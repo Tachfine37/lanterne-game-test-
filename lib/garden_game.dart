@@ -102,12 +102,38 @@ class GardenGame extends Game {
     final actors = <({double y, void Function() draw})>[
       (y: run.player.dy, draw: () => hero(c, run.player)),
       for (final e in run.enemies) (y: e.p.dy, draw: () => enemy(c, e)),
+      if (run.room == Reward.shop && !showPreview)
+        (y: RunModel.merchant.dy, draw: () => merchant(c)),
+      if (run.pickup case final reward?)
+        (y: reward.p.dy, draw: () => pedestal(c, reward)),
       if (showPreview) ...[
         (y: 200, draw: () => preview(c, const Offset(95, 200), Kind.mushroom)),
         (y: 220, draw: () => preview(c, const Offset(345, 220), Kind.moth)),
         (y: 475, draw: () => preview(c, const Offset(330, 475), Kind.beetle)),
       ],
     ]..sort((a, b) => a.y.compareTo(b.y));
+    if (!showPreview) {
+      for (final door in run.doors) {
+        doorway(c, door);
+      }
+      if (run.room == Reward.fountain) spring(c);
+    }
+    for (final coin in run.loot) {
+      final p = coin.p - Offset(0, 8 + sin(clock * 6 + coin.p.dx) * 2);
+      glow(c, p, 12, gold);
+      circle(c, p, 3.2, gold);
+      circle(c, p, 1.3, const Color(0xFFFFF7E0));
+    }
+    for (final g in run.ghosts) {
+      oval(
+        c,
+        g.p.dx,
+        g.p.dy - 18,
+        24,
+        32,
+        gold.withValues(alpha: g.life.clamp(0, 1) * .3),
+      );
+    }
     for (final e in run.enemies) {
       if (e.tell > 0 && e.kind != Kind.toad) {
         if (e.boss) {
@@ -227,22 +253,27 @@ class GardenGame extends Game {
       );
       label(
         c,
-        run.wave == 5
-            ? 'LE SANCTUAIRE S’ÉVEILLE'
-            : run.wave == totalWaves
-            ? 'MINUIT APPROCHE'
-            : 'VAGUE ${run.wave}',
+        switch (run.room) {
+          Reward.boss when run.depth == totalDepth => 'MINUIT APPROCHE',
+          Reward.boss => 'LE SANCTUAIRE S’ÉVEILLE',
+          Reward.shop => 'L’ÉCHOPPE',
+          Reward.fountain => 'LA SOURCE',
+          _ => 'SALLE ${run.depth}${run.elite ? '  ·  ÉPREUVE' : ''}',
+        },
         const Offset(220, 296),
         18,
-        gold,
+        run.elite ? const Color(0xFFFF9F86) : gold,
       );
       label(
         c,
-        isBossWave(run.wave)
-            ? 'Garde tes distances.'
-            : run.wave == 6
-            ? 'Le bassin de lune s’ouvre.'
-            : 'Protège la lumière.',
+        switch (run.room) {
+          Reward.boss => 'Garde tes distances.',
+          Reward.shop => 'Approche-toi de Maître Crapaud.',
+          Reward.fountain => 'Bois à la source pour te soigner.',
+          _ when run.elite => 'Plus d’ombres, récompense doublée.',
+          _ when run.depth == roomsPerBiome + 1 => 'Le bassin de lune s’ouvre.',
+          _ => 'Récompense : ${rewardNames[run.room]}',
+        },
         const Offset(220, 323),
         13,
         mint,
@@ -265,6 +296,12 @@ class GardenGame extends Game {
         a + unit(b - a) * min(28, (b - a).distance),
         15,
         const Color(0x99FFDFAC),
+      );
+    }
+    if (run.fade > 0) {
+      c.drawRect(
+        const Rect.fromLTWH(-40, -40, 520, 720),
+        Paint()..color = const Color(0xFF0D2027).withValues(alpha: run.fade),
       );
     }
     c.restore();
@@ -390,12 +427,8 @@ class GardenGame extends Game {
       );
     }
     // Distant shrine, moonstone door and lanterns.
-    oval(c, 220, 67, 142, 29, const Color(0x5505141D));
-    rect(c, const Rect.fromLTWH(168, 20, 104, 48), const Color(0xFF193037), 8);
-    rect(c, const Rect.fromLTWH(183, 14, 74, 49), const Color(0xFF46635B), 30);
-    rect(c, const Rect.fromLTWH(193, 22, 54, 43), const Color(0xFF173537), 23);
-    glow(c, const Offset(220, 39), 42, mint);
-    label(c, '✦', const Offset(220, 40), 28, mint);
+    final centerDoor = run.doors.any((d) => d.p.dx == 220);
+    if (!centerDoor) shrine(c);
     for (final p in [
       const Offset(46, 102),
       const Offset(394, 102),
@@ -412,6 +445,19 @@ class GardenGame extends Game {
         .8 + (i % 3) * .2,
       );
     }
+    decorations(c);
+  }
+
+  void shrine(Canvas c) {
+    oval(c, 220, 67, 142, 29, const Color(0x5505141D));
+    rect(c, const Rect.fromLTWH(168, 20, 104, 48), const Color(0xFF193037), 8);
+    rect(c, const Rect.fromLTWH(183, 14, 74, 49), const Color(0xFF46635B), 30);
+    rect(c, const Rect.fromLTWH(193, 22, 54, 43), const Color(0xFF173537), 23);
+    glow(c, const Offset(220, 39), 42, mint);
+    label(c, '✦', const Offset(220, 40), 28, mint);
+  }
+
+  void decorations(Canvas c) {
     for (final p in [
       const Offset(21, 228),
       const Offset(415, 367),
@@ -424,6 +470,301 @@ class GardenGame extends Game {
         oval(c, p.dx + cos(a) * 4, p.dy + sin(a) * 4, 6, 5, mint);
       }
       circle(c, p, 2, gold);
+    }
+  }
+
+  /// Door colours follow Hades' laurels: gold lasts one run, blue is kept,
+  /// red warns of a guardian or a harder room.
+  Color rewardColor(Reward reward, {bool elite = false}) {
+    if (elite || reward == Reward.boss) return const Color(0xFFFF9F86);
+    if (reward == Reward.embers) return const Color(0xFF9FC4FF);
+    return gold;
+  }
+
+  void rewardIcon(Canvas c, Offset p, Reward reward, double s) {
+    final fill = Paint();
+    switch (reward) {
+      case Reward.gift:
+        glow(c, p, s * 2.4, mint);
+        final star = Path();
+        for (var i = 0; i < 8; i++) {
+          final a = i * pi / 4 - pi / 2 + clock * .6;
+          final r = i.isEven ? s : s * .38;
+          final q = p + Offset(cos(a), sin(a)) * r;
+          i == 0 ? star.moveTo(q.dx, q.dy) : star.lineTo(q.dx, q.dy);
+        }
+        c.drawPath(star..close(), fill..color = const Color(0xFFE9FFF6));
+        circle(c, p, s * .3, mint);
+      case Reward.coins:
+        for (final d in const [Offset(-5, 3), Offset(5, 3), Offset(0, -5)]) {
+          final q = p + d * (s / 10);
+          glow(c, q, s, gold);
+          circle(c, q, s * .38, gold);
+          circle(c, q, s * .15, const Color(0xFFFFF7E0));
+        }
+      case Reward.health:
+        final heart = Path()
+          ..moveTo(p.dx, p.dy + s * .75)
+          ..cubicTo(
+            p.dx - s * 1.3,
+            p.dy - s * .1,
+            p.dx - s * .6,
+            p.dy - s * 1.1,
+            p.dx,
+            p.dy - s * .35,
+          )
+          ..cubicTo(
+            p.dx + s * .6,
+            p.dy - s * 1.1,
+            p.dx + s * 1.3,
+            p.dy - s * .1,
+            p.dx,
+            p.dy + s * .75,
+          );
+        glow(c, p, s * 2.2, const Color(0xFFFF9FB8));
+        c.drawPath(heart, fill..color = const Color(0xFFF08AA6));
+        circle(
+          c,
+          p + Offset(-s * .35, -s * .35),
+          s * .14,
+          const Color(0xFFFFE2EA),
+        );
+      case Reward.embers:
+        final flame = Path()
+          ..moveTo(p.dx, p.dy - s)
+          ..quadraticBezierTo(p.dx + s * .9, p.dy, p.dx + s * .5, p.dy + s * .6)
+          ..quadraticBezierTo(
+            p.dx,
+            p.dy + s * .95,
+            p.dx - s * .5,
+            p.dy + s * .6,
+          )
+          ..quadraticBezierTo(p.dx - s * .9, p.dy, p.dx, p.dy - s);
+        glow(c, p, s * 2.2, const Color(0xFFFFA25E));
+        c.drawPath(flame, fill..color = const Color(0xFFFF9A52));
+        oval(c, p.dx, p.dy + s * .3, s * .6, s * .8, const Color(0xFFFFE0A0));
+      case Reward.shop:
+        oval(c, p.dx, p.dy + s * .2, s * 1.7, s * 1.5, const Color(0xFF9C7A52));
+        rect(
+          c,
+          Rect.fromCenter(
+            center: p - Offset(0, s * .6),
+            width: s * .9,
+            height: s * .35,
+          ),
+          const Color(0xFF7A5C3C),
+          2,
+        );
+        circle(c, p + Offset(0, s * .25), s * .35, gold);
+      case Reward.fountain:
+        final drop = Path()
+          ..moveTo(p.dx, p.dy - s)
+          ..cubicTo(
+            p.dx + s,
+            p.dy,
+            p.dx + s * .7,
+            p.dy + s * .8,
+            p.dx,
+            p.dy + s * .8,
+          )
+          ..cubicTo(
+            p.dx - s * .7,
+            p.dy + s * .8,
+            p.dx - s,
+            p.dy,
+            p.dx,
+            p.dy - s,
+          );
+        glow(c, p, s * 2.2, const Color(0xFF8FD0FF));
+        c.drawPath(drop, fill..color = const Color(0xFF8FD0FF));
+        circle(
+          c,
+          p + Offset(-s * .25, s * .1),
+          s * .15,
+          const Color(0xFFFFFFFF),
+        );
+      case Reward.boss:
+        glow(c, p, s * 2.2, const Color(0xFFFF8E81));
+        circle(c, p - Offset(0, s * .15), s * .85, const Color(0xFFE8DCC8));
+        rect(
+          c,
+          Rect.fromCenter(
+            center: p + Offset(0, s * .6),
+            width: s * .9,
+            height: s * .5,
+          ),
+          const Color(0xFFE8DCC8),
+          2,
+        );
+        circle(
+          c,
+          p + Offset(-s * .32, -s * .15),
+          s * .24,
+          const Color(0xFF3A1F24),
+        );
+        circle(
+          c,
+          p + Offset(s * .32, -s * .15),
+          s * .24,
+          const Color(0xFF3A1F24),
+        );
+    }
+  }
+
+  /// A stone archway on the north wall; its light and icon show the reward.
+  void doorway(Canvas c, Door door) {
+    final x = door.p.dx;
+    final tint = rewardColor(door.reward, elite: door.elite);
+    final breathe = .75 + sin(clock * 3 + x) * .25;
+    oval(c, x, 96, 74, 18, const Color(0x6605141D));
+    rect(c, Rect.fromLTWH(x - 33, 22, 66, 76), const Color(0xFF1A3036), 30);
+    rect(c, Rect.fromLTWH(x - 29, 18, 58, 76), const Color(0xFF4E6A60), 28);
+    rect(c, Rect.fromLTWH(x - 21, 28, 42, 66), const Color(0xFF0E1D22), 21);
+    glow(c, Offset(x, 70), 46, tint.withValues(alpha: breathe));
+    c.drawCircle(
+      Offset(x, 56),
+      17,
+      Paint()
+        ..color = tint.withValues(alpha: .85)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+    rewardIcon(c, Offset(x, 56 + sin(clock * 2.5 + x) * 1.5), door.reward, 9);
+    if (door.elite) {
+      rewardIcon(c, Offset(x + 20, 34), Reward.boss, 5);
+    }
+    // Light spilling onto the paving invites the player through.
+    oval(c, x, 104, 46, 12, tint.withValues(alpha: .18 * breathe));
+  }
+
+  void pedestal(Canvas c, Pickup reward) {
+    final p = reward.p;
+    final lift = sin(clock * 2.4) * 3;
+    oval(c, p.dx, p.dy + 4, 50, 16, const Color(0x66061318));
+    rect(
+      c,
+      Rect.fromCenter(center: p, width: 34, height: 16),
+      const Color(0xFF557468),
+      6,
+    );
+    oval(c, p.dx, p.dy - 7, 38, 12, const Color(0xFF7C9A8B));
+    final ring = rewardColor(reward.reward, elite: reward.elite);
+    c.drawCircle(
+      p - Offset(0, 34 + lift),
+      19,
+      Paint()
+        ..color = ring.withValues(alpha: .8)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2,
+    );
+    rewardIcon(c, p - Offset(0, 34 + lift), reward.reward, 11);
+  }
+
+  void spring(Canvas c) {
+    const p = RunModel.fountain;
+    final full = !run.fountainUsed;
+    oval(c, p.dx, p.dy + 10, 112, 40, const Color(0x66061318));
+    oval(c, p.dx, p.dy, 104, 46, const Color(0xFF4E6A60));
+    oval(c, p.dx, p.dy - 3, 88, 34, const Color(0xFF2A3F45));
+    oval(
+      c,
+      p.dx,
+      p.dy - 3,
+      80,
+      28,
+      full ? const Color(0xFF5FA8D8) : const Color(0xFF2E4E62),
+    );
+    if (full) {
+      glow(c, p - const Offset(0, 10), 70, const Color(0xFF8FD0FF));
+      for (var i = 0; i < 5; i++) {
+        final t = (clock * .8 + i / 5) % 1;
+        circle(
+          c,
+          p + Offset(sin(i * 2.1) * 10, -8 - t * 34),
+          2.4 * (1 - t),
+          const Color(0xCCE6F6FF),
+        );
+      }
+    }
+    rect(
+      c,
+      Rect.fromCenter(center: p - const Offset(0, 16), width: 12, height: 26),
+      const Color(0xFF7C9A8B),
+      4,
+    );
+  }
+
+  /// Maître Crapaud: a merchant toad in a violet cloak, lantern in hand.
+  void merchant(Canvas c) {
+    const p = RunModel.merchant;
+    final bob = sin(clock * 1.6) * 1.5;
+    oval(c, p.dx, p.dy + 6, 120, 34, const Color(0xFF3B2F55));
+    oval(c, p.dx, p.dy + 4, 104, 26, const Color(0xFF55457A));
+    for (final (i, color) in const [
+      Color(0xFFF08AA6),
+      Color(0xFF8FD0FF),
+      Color(0xFFFFB45E),
+    ].indexed) {
+      final q = p + Offset(-40 + i * 12.0, 4);
+      rect(
+        c,
+        Rect.fromCenter(center: q - const Offset(0, 6), width: 8, height: 12),
+        color,
+        3,
+      );
+      circle(c, q - const Offset(0, 14), 2, const Color(0xFFE8DCC8));
+    }
+    c.save();
+    c.translate(p.dx + 10, p.dy + bob);
+    oval(c, 0, -2, 58, 20, const Color(0x66061318));
+    final cloak = Path()
+      ..moveTo(-24, -34)
+      ..quadraticBezierTo(-32, -8, -28, 2)
+      ..quadraticBezierTo(0, 10, 28, 2)
+      ..quadraticBezierTo(32, -8, 24, -34)
+      ..close();
+    c.drawPath(cloak, Paint()..color = const Color(0xFF6B5494));
+    oval(c, 0, -20, 34, 30, const Color(0xFFCFE0B4));
+    oval(c, 0, -42, 50, 32, const Color(0xFF6E9C74));
+    circle(c, const Offset(-13, -56), 8, const Color(0xFF6E9C74));
+    circle(c, const Offset(13, -56), 8, const Color(0xFF6E9C74));
+    circle(c, const Offset(-13, -57), 4, gold);
+    circle(c, const Offset(13, -57), 4, gold);
+    circle(c, const Offset(-13, -57), 1.8, const Color(0xFF23302C));
+    circle(c, const Offset(13, -57), 1.8, const Color(0xFF23302C));
+    line(
+      c,
+      const Offset(-10, -36),
+      const Offset(10, -36),
+      const Color(0xFF3F5E48),
+      2,
+    );
+    // Tall hat with a gold band.
+    rect(c, const Rect.fromLTWH(-20, -70, 40, 5), const Color(0xFF2B2440), 2);
+    rect(c, const Rect.fromLTWH(-12, -90, 24, 22), const Color(0xFF2B2440), 3);
+    rect(c, const Rect.fromLTWH(-12, -74, 24, 4), gold, 1);
+    line(
+      c,
+      const Offset(30, -60),
+      const Offset(30, 4),
+      const Color(0xFF916D51),
+      3,
+    );
+    glow(c, const Offset(30, -64), 30, gold);
+    rect(c, const Rect.fromLTWH(24, -72, 12, 14), const Color(0xFFFFE7A7), 3);
+    c.restore();
+    if (run.shopArmed && (run.player - p).distance < 160) {
+      rect(
+        c,
+        Rect.fromCenter(
+          center: p + const Offset(10, -112),
+          width: 26,
+          height: 22,
+        ),
+        const Color(0xE6FFF1D6),
+        8,
+      );
+      label(c, '!', p + const Offset(10, -112), 15, const Color(0xFF3B2F55));
     }
   }
 

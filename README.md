@@ -6,15 +6,16 @@ Prototype de roguelite **Flutter + Flame**. Gameplay 2D, représentation en volu
 
 Version web : https://Tachfine37.github.io/lanterne-game-test-/
 
-- Mobile : maintenir et glisser le doigt dans le jardin ; relâcher pour tirer.
-- Ordinateur : flèches, WASD ou ZQSD ; P / Échap pour la pause ; M pour couper le son.
-- 10 vagues sur 2 biomes : le Jardin des murmures puis le Bassin de lune.
-- 6 types d'ennemis : champignon, phalène (tir), scarabée (charge), champignon-mère (se divise en spores), crapaud-mortier (tir en cloche avec zone d'impact annoncée).
-- 2 gardiens : la Tortue-sanctuaire (vague 5) et la Chouette de minuit (vague 10, spirales, éventails et invocations, enragée sous 50 % de vie).
-- 16 dons cumulables, avec synergies (critiques, explosions en chaîne, rebonds vers un autre ennemi, bouclier, givre, vol de vie…). Une relance des dons par partie.
-- Chaque partie rapporte des braises à dépenser à l'autel des braises en améliorations permanentes : PV, dégâts, vitesse, relances.
-- Ressenti : dégâts flottants, coups critiques, recul des ennemis, tremblement d'écran, ondes de choc.
-- Sons et musique synthétisés en direct (Web Audio), sans fichier audio.
+- Mobile : maintenir et glisser le doigt dans le jardin ; relâcher pour tirer ; bouton ⚡ pour esquiver.
+- Ordinateur : flèches, WASD ou ZQSD ; Espace ou Maj pour esquiver ; P / Échap pour la pause ; M pour couper le son.
+- Structure à la Hades : 12 salles sur 2 biomes (Jardin des murmures, Bassin de lune), chacun terminé par un gardien.
+- Chaque salle vidée laisse sa récompense sur un piédestal ; la prendre ouvre 2 ou 3 portes qui montrent chacune ce qui attend derrière : don d'esprit, lucioles, cœur de rosée (+PV max), braises (anneau bleu : conservées), échoppe ou source de soin. Une porte marquée d'un crâne mène à une salle d'épreuve : plus d'ombres, récompense doublée.
+- Les ombres vaincues lâchent des lucioles, la monnaie de la partie ; une fois la salle sûre, elles viennent à toi.
+- Maître Crapaud tient l'échoppe : un don, des soins, des PV max, des relances ou des braises contre des lucioles.
+- Esquive : une ruée courte et invincible, avec un temps de recharge.
+- 6 types d'ennemis, 2 gardiens (la Tortue-sanctuaire et la Chouette de minuit), 16 dons cumulables avec synergies.
+- Chaque partie rapporte des braises à dépenser à l'autel des braises en améliorations permanentes.
+- Dégâts flottants, critiques, recul, tremblement d'écran ; sons et musique synthétisés en direct (Web Audio).
 - Meilleur score, braises, améliorations et réglage du son enregistrés localement si le navigateur autorise le stockage.
 
 ## Développer
@@ -39,6 +40,6 @@ Le workflow `.github/workflows/pages.yml` vérifie et publie `main`. GitHub Page
 
 ## Limites du prototype
 
-Deux biomes sur la même arène, pas de multijoueur. Les sons sont synthétisés : pas encore de vrais bruitages ni de sons sur les builds natifs. Les végétaux et lanternes sur les bords sont décoratifs. Le build web n'est pas une application iOS native ; les performances Safari/iPhone nécessitent des essais sur appareil réel.
+Deux biomes sur la même arène (les salles ne changent que par leur contenu), pas encore de hub ni de dialogues, pas de multijoueur. Les sons sont synthétisés : pas encore de vrais bruitages ni de sons sur les builds natifs. Les végétaux et lanternes sur les bords sont décoratifs. Le build web n'est pas une application iOS native ; les performances Safari/iPhone nécessitent des essais sur appareil réel.
 
 Pour préparer iOS sur un Mac : `flutter create --platforms=ios .`, configurer la signature Xcode puis tester sur iPhone. Une migration Unity/Godot nécessite une réécriture ; règles et direction artistique restent réutilisables.

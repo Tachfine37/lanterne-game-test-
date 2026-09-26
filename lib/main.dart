@@ -178,6 +178,13 @@ class _GardenScreenState extends State<GardenScreen>
       }
       return KeyEventResult.handled;
     }
+    if (event is KeyDownEvent &&
+        (event.logicalKey == LogicalKeyboardKey.space ||
+            event.logicalKey == LogicalKeyboardKey.shiftLeft ||
+            event.logicalKey == LogicalKeyboardKey.shiftRight)) {
+      run.dash();
+      return KeyEventResult.handled;
+    }
     if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyM) {
       toggleMute();
       return KeyEventResult.handled;
@@ -391,6 +398,18 @@ class _GardenScreenState extends State<GardenScreen>
           ),
           const SizedBox(height: 18),
           tip(
+            Icons.bolt_rounded,
+            'Esquive',
+            'Espace ou Maj : une ruée invincible.\nSur mobile, le bouton ⚡.',
+          ),
+          const SizedBox(height: 18),
+          tip(
+            Icons.door_front_door_outlined,
+            'Choisis ta porte',
+            'Chaque porte montre sa récompense :\ndon, lucioles, soin, échoppe…',
+          ),
+          const SizedBox(height: 18),
+          tip(
             Icons.spa_outlined,
             'Compose tes pouvoirs',
             'Choisis un don après chaque\nvague. Fais grandir ta lumière.',
@@ -457,18 +476,18 @@ class _GardenScreenState extends State<GardenScreen>
                 size: 23,
               ),
               const SizedBox(height: 14),
-              small('10 VAGUES  ·  2 GARDIENS', spacing: .8),
+              small('12 SALLES  ·  2 GARDIENS', spacing: .8),
               const SizedBox(height: 22),
               Row(
                 children: List.generate(
-                  totalWaves,
+                  totalDepth,
                   (i) => Expanded(
                     child: Container(
                       height: 4,
                       margin: const EdgeInsets.only(right: 3),
                       decoration: BoxDecoration(
-                        color: i < run.wave
-                            ? (isBossWave(i + 1)
+                        color: i < run.depth
+                            ? (isBossDepth(i + 1)
                                   ? const Color(0xFFD59DAB)
                                   : gold)
                             : Colors.white10,
@@ -479,7 +498,7 @@ class _GardenScreenState extends State<GardenScreen>
                 ),
               ),
               const SizedBox(height: 9),
-              small('Vague ${run.wave} sur $totalWaves', color: gold),
+              small('Salle ${run.depth} sur $totalDepth', color: gold),
               const SizedBox(height: 3),
               small(biomeNames[run.biome], spacing: 1),
             ],
@@ -589,9 +608,9 @@ class _GardenScreenState extends State<GardenScreen>
                 const SizedBox(width: 12),
                 Column(
                   children: [
-                    small('VAGUE', spacing: 1),
+                    small('SALLE', spacing: 1),
                     Text(
-                      '${run.wave} / $totalWaves',
+                      '${run.depth} / $totalDepth',
                       style: const TextStyle(fontSize: 15, color: gold),
                     ),
                   ],
@@ -698,7 +717,18 @@ class _GardenScreenState extends State<GardenScreen>
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              small('${run.kills} ✦', color: gold),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.circle,
+                                    size: 7,
+                                    color: gold,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  small('${run.coins}', color: gold),
+                                ],
+                              ),
                             ],
                           ),
                         ),
@@ -730,11 +760,13 @@ class _GardenScreenState extends State<GardenScreen>
                           ],
                         ),
                       ),
-                    if (run.phase == Phase.playing && run.elapsed < 12)
+                    if (run.phase == Phase.playing)
+                      Positioned(right: 12, bottom: 12, child: dashButton()),
+                    if (run.phase == Phase.playing && run.elapsed < 14)
                       Positioned(
                         bottom: 25,
                         left: 16,
-                        right: 16,
+                        right: 84,
                         child: IgnorePointer(
                           child: Center(
                             child: Container(
@@ -747,7 +779,8 @@ class _GardenScreenState extends State<GardenScreen>
                                 borderRadius: BorderRadius.circular(30),
                               ),
                               child: const Text(
-                                'Glisse pour bouger · Relâche pour tirer',
+                                'Glisse · relâche pour tirer · ⚡ esquive',
+                                textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 11, color: gold),
                               ),
                             ),
@@ -764,7 +797,7 @@ class _GardenScreenState extends State<GardenScreen>
             padding: const EdgeInsets.only(top: 8, bottom: 2),
             child: small(
               run.phase == Phase.playing
-                  ? '${run.moving ? 'EN MOUVEMENT' : 'TIR AUTOMATIQUE'}   ·   ${run.acquired.length} DONS   ·   ${run.elapsed.floor()} s'
+                  ? '${run.moving ? 'EN MOUVEMENT' : 'TIR AUTOMATIQUE'}   ·   ${run.acquired.length} DONS   ·   ${run.coins} LUCIOLES'
                   : 'UNE EXPÉDITION À LA LUEUR DES LANTERNES',
               spacing: 1.2,
             ),
@@ -849,7 +882,9 @@ class _GardenScreenState extends State<GardenScreen>
                   color: const Color(0xFFC5D6CC),
                 ),
                 const SizedBox(height: 5),
-                small('Clavier : flèches / ZQSD / WASD  ·  M : son'),
+                small(
+                  'Clavier : flèches / ZQSD  ·  Espace : esquive  ·  M : son',
+                ),
                 const SizedBox(height: 18),
                 secondary(
                   'Autel des braises  ·  $embers',
@@ -860,22 +895,24 @@ class _GardenScreenState extends State<GardenScreen>
                 const Icon(Icons.auto_awesome, color: gold, size: 32),
                 const SizedBox(height: 12),
                 small(
-                  run.wave == 5
+                  run.room == Reward.boss
                       ? 'LE GARDIEN EST TOMBÉ'
-                      : 'VAGUE ${run.wave} TRAVERSÉE',
+                      : run.room == Reward.shop
+                      ? 'MAÎTRE CRAPAUD'
+                      : 'SALLE ${run.depth} TRAVERSÉE',
                   color: mint,
                   spacing: 2,
                 ),
                 const SizedBox(height: 10),
                 heading(
-                  run.wave == 5
+                  run.room == Reward.boss
                       ? 'Le bassin de lune\ns’ouvre à toi.'
                       : 'Fais grandir\nta lumière.',
                   size: 33,
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  run.wave == 5
+                  run.room == Reward.boss
                       ? 'Tu reprends des forces. Choisis un don.'
                       : 'Choisis un don pour la suite du voyage.',
                   style: const TextStyle(color: muted, fontSize: 12),
@@ -944,6 +981,8 @@ class _GardenScreenState extends State<GardenScreen>
                     () => setState(run.reroll),
                     icon: Icons.casino_outlined,
                   ),
+              ] else if (run.phase == Phase.shop) ...[
+                ...shopView(),
               ] else if (run.phase == Phase.paused) ...[
                 const Icon(Icons.nightlight_round, size: 40, color: gold),
                 const SizedBox(height: 20),
@@ -984,7 +1023,7 @@ class _GardenScreenState extends State<GardenScreen>
                 ),
                 const SizedBox(height: 10),
                 small(
-                  'Vague ${run.wave} sur $totalWaves  ·  +${run.embersEarned} braises',
+                  'Salle ${run.depth} sur $totalDepth  ·  +${run.embersEarned} braises',
                   color: gold,
                   spacing: 1,
                 ),
@@ -1018,6 +1057,112 @@ class _GardenScreenState extends State<GardenScreen>
       ),
     );
   }
+
+  Widget dashButton() {
+    final ready = run.dashCooldown <= 0;
+    return Tooltip(
+      message: 'Esquive',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) {
+          run.dash();
+          focus.requestFocus();
+        },
+        child: Container(
+          width: 58,
+          height: 58,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: ink.withValues(alpha: .72),
+            border: Border.all(
+              color: gold.withValues(alpha: ready ? .8 : .25),
+              width: 2,
+            ),
+          ),
+          child: Icon(
+            Icons.bolt_rounded,
+            color: gold.withValues(alpha: ready ? 1 : .35),
+            size: 28,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Maître Crapaud's stall: three wares bought with the run's fireflies.
+  List<Widget> shopView() => [
+    const Icon(Icons.storefront_rounded, color: gold, size: 34),
+    const SizedBox(height: 12),
+    small('MAÎTRE CRAPAUD', color: mint, spacing: 2),
+    const SizedBox(height: 10),
+    heading('« Des lueurs contre\ntes lucioles ? »', size: 26),
+    const SizedBox(height: 10),
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.circle, size: 8, color: gold),
+        const SizedBox(width: 6),
+        Text(
+          '${run.coins} lucioles',
+          style: const TextStyle(color: gold, fontSize: 13),
+        ),
+      ],
+    ),
+    const SizedBox(height: 18),
+    for (final ware in run.wares)
+      Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF223D40),
+          border: Border.all(color: const Color(0xFF587064)),
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    ware.name,
+                    style: TextStyle(
+                      color: ware.sold ? muted : gold,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      decoration: ware.sold ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    ware.description,
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: ware.sold || run.coins < ware.price
+                  ? null
+                  : () => setState(() => run.buy(ware)),
+              style: FilledButton.styleFrom(
+                backgroundColor: gold,
+                foregroundColor: ink,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              child: Text(ware.sold ? 'Vendu' : '${ware.price} ●'),
+            ),
+          ],
+        ),
+      ),
+    const SizedBox(height: 6),
+    button('Reprendre la route', () {
+      clearInput();
+      setState(run.leaveShop);
+      focus.requestFocus();
+    }),
+  ];
 
   Widget secondary(String text, VoidCallback onPressed, {IconData? icon}) =>
       SizedBox(

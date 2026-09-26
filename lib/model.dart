@@ -1,7 +1,7 @@
 import 'dart:math';
 import 'dart:ui';
 
-enum Phase { title, playing, upgrade, paused, won, lost }
+enum Phase { title, playing, upgrade, shop, paused, won, lost }
 
 enum Kind { mushroom, moth, beetle, tortoise, broodcap, spore, toad, owl }
 
@@ -20,11 +20,17 @@ enum Sfx {
   gift,
   win,
   lose,
+  coin,
+  dash,
+  door,
+  buy,
 }
 
-const totalWaves = 10;
-bool isBossWave(int wave) => wave == 5 || wave == totalWaves;
-int biomeOf(int wave) => wave <= 5 ? 0 : 1;
+/// Each biome is five rooms chosen through doors, then a guardian.
+const roomsPerBiome = 6;
+const totalDepth = roomsPerBiome * 2;
+bool isBossDepth(int depth) => depth % roomsPerBiome == 0;
+int biomeOf(int depth) => depth <= roomsPerBiome ? 0 : 1;
 const biomeNames = ['JARDIN DES MURMURES', 'BASSIN DE LUNE'];
 
 class Gift {
@@ -193,6 +199,61 @@ class Ring {
   Ring(this.p, this.size, this.hostile);
 }
 
+/// What waits behind a door. Gold rewards last one run, embers are kept.
+enum Reward { gift, coins, health, embers, shop, fountain, boss }
+
+bool isCombat(Reward r) =>
+    r == Reward.gift ||
+    r == Reward.coins ||
+    r == Reward.health ||
+    r == Reward.embers;
+
+const rewardNames = {
+  Reward.gift: 'Lueur d’esprit',
+  Reward.coins: 'Nuée de lucioles',
+  Reward.health: 'Cœur de rosée',
+  Reward.embers: 'Braises anciennes',
+  Reward.shop: 'Échoppe de Maître Crapaud',
+  Reward.fountain: 'Source de rosée',
+  Reward.boss: 'Le gardien',
+};
+
+class Door {
+  final Offset p;
+  final Reward reward;
+  final bool elite;
+  const Door(this.p, this.reward, {this.elite = false});
+}
+
+/// The room's reward, waiting on a pedestal once the room is cleared.
+class Pickup {
+  final Offset p;
+  final Reward reward;
+  final bool elite;
+  Pickup(this.p, this.reward, this.elite);
+}
+
+/// A firefly dropped by a fallen shadow: the run's currency.
+class Coin {
+  Offset p, v;
+  double age = 0;
+  Coin(this.p, this.v);
+}
+
+/// Afterimage left by a dash.
+class Ghost {
+  final Offset p;
+  double life = 1;
+  Ghost(this.p);
+}
+
+class Ware {
+  final String id, name, description;
+  final int price;
+  bool sold = false;
+  Ware(this.id, this.name, this.description, this.price);
+}
+
 /// Floating damage number.
 class Popup {
   final String text;
@@ -216,9 +277,22 @@ class RunModel {
   List<Popup> popups = [];
   List<Gift> choices = [];
   List<Gift> acquired = [];
+  List<Door> doors = [];
+  List<Coin> loot = [];
+  List<Ghost> ghosts = [];
+  List<Ware> wares = [];
+  Pickup? pickup;
+  Door? pendingDoor;
+  Reward room = Reward.gift;
+  bool elite = false, cleared = false, doorsOpen = false;
+  bool shopArmed = true, fountainUsed = false;
+  int coins = 0, emberBonus = 0;
+  double fade = 0, dashTime = 0, dashCooldown = 0;
+  Offset facing = const Offset(0, -1), dashDirection = Offset.zero;
+  static const merchant = Offset(220, 205), fountain = Offset(220, 300);
   final List<Sfx> events = [];
   Map<String, int> perkLevels = {};
-  int wave = 1, kills = 0, multishot = 1, bounce = 0, pierce = 0, orbits = 0;
+  int depth = 1, kills = 0, multishot = 1, bounce = 0, pierce = 0, orbits = 0;
   int chain = 0, lifesteal = 0, bloom = 0, veil = 0, frost = 0, nova = 0;
   int regen = 0, rerolls = 0;
   double hp = 100, maxHp = 100, speed = 145, damage = 15, interval = .62;
@@ -232,10 +306,18 @@ class RunModel {
   double grace = 1.7, orbitCooldown = 0;
   bool get moving => movement.distance > .12;
   bool get finished => phase == Phase.won || phase == Phase.lost;
-  int get biome => biomeOf(wave);
+  int get biome => biomeOf(depth);
+  bool get dashing => dashTime > 0;
   int get score =>
-      kills * 25 + (wave - 1) * 100 + (phase == Phase.won ? 1000 : 0);
-  int get embersEarned => score ~/ 20;
+      kills * 25 + (depth - 1) * 100 + (phase == Phase.won ? 1000 : 0);
+  int get embersEarned => score ~/ 20 + emberBonus;
+
+  /// Combat difficulty on the scale of the original ten waves.
+  double get tier {
+    final k = (depth - 1) % roomsPerBiome;
+    return (biome == 0 ? 1 : 6) + k * .8;
+  }
+
   Enemy? get boss {
     for (final e in enemies) {
       if (e.boss) return e;
@@ -256,12 +338,17 @@ class RunModel {
     popups.clear();
     events.clear();
     acquired.clear();
+    loot.clear();
+    ghosts.clear();
+    coins = emberBonus = 0;
+    fade = dashTime = dashCooldown = 0;
+    pendingDoor = null;
     hp = maxHp = 100 + 12.0 * perk('vitality');
     speed = 145 * (1 + .06 * perk('swift'));
     damage = 15 * (1 + .08 * perk('ember'));
     rerolls = 1 + perk('fortune');
     interval = .62;
-    wave = 1;
+    depth = 0;
     kills = 0;
     multishot = 1;
     bounce = pierce = orbits = 0;
@@ -270,7 +357,7 @@ class RunModel {
     veilReady = false;
     elapsed = cooldown = invincible = orbitClock = orbitCooldown = 0;
     phase = Phase.playing;
-    spawnWave();
+    loadRoom(const Door(Offset.zero, Reward.gift));
   }
 
   static List<Kind> roster(int wave) => switch (wave) {
@@ -296,35 +383,196 @@ class RunModel {
     _ => 27,
   };
 
-  void spawnWave() {
+  /// Enters the next room: the door's reward decides what the room holds.
+  void loadRoom(Door door) {
+    depth++;
+    room = door.reward;
+    elite = door.elite;
+    enemies.clear();
     bolts.clear();
     shells.clear();
+    loot.clear();
+    doors = [];
+    wares = [];
+    pickup = null;
+    cleared = doorsOpen = fountainUsed = false;
+    shopArmed = true;
     movement = Offset.zero;
+    dashTime = 0;
     waveTime = 0;
     grace = 1.5;
-    player = const Offset(220, 440);
+    player = const Offset(220, 548);
     events.add(Sfx.waveStart);
-    if (wave == 5) {
-      enemies.add(Enemy(const Offset(220, 155), Kind.tortoise, 650, 2));
-      return;
+    switch (room) {
+      case Reward.boss:
+        enemies.add(
+          depth == totalDepth
+              ? Enemy(const Offset(220, 150), Kind.owl, 1800, 2.5)
+              : Enemy(const Offset(220, 155), Kind.tortoise, 650, 2),
+        );
+      case Reward.shop:
+        wares = rollWares();
+        cleared = true;
+        openDoors();
+      case Reward.fountain:
+        cleared = true;
+        openDoors();
+      default:
+        spawnEnemies();
     }
-    if (wave == totalWaves) {
-      enemies.add(Enemy(const Offset(220, 150), Kind.owl, 1800, 2.5));
-      return;
-    }
-    final kinds = roster(wave);
-    final count = wave < 5 ? 3 + wave * 2 : 6 + (wave - 5) * 2;
+  }
+
+  void spawnEnemies() {
+    final t = tier;
+    final kinds = roster(t.floor());
+    var count = (t < 5 ? 3 + t * 2 : 6 + (t - 5) * 2).round();
+    if (elite) count = (count * 1.25).round();
     for (var i = 0; i < count; i++) {
       final kind = kinds[i % kinds.length];
       final x = 65.0 + (i % 4) * 100 + random.nextDouble() * 12;
-      final y = 120.0 + (i ~/ 4) * 78;
-      enemies.add(
-        Enemy(
-          Offset(x, y),
-          kind,
-          baseHp(kind) + wave * (wave < 5 ? 5 : 8),
-          1 + random.nextDouble() * 2,
+      final y = 120.0 + (i ~/ 4) * 70;
+      final hp = (baseHp(kind) + t * (t < 5 ? 5 : 8)) * (elite ? 1.3 : 1);
+      enemies.add(Enemy(Offset(x, y), kind, hp, 1 + random.nextDouble() * 2));
+    }
+  }
+
+  /// Exits appear once the reward is taken; each shows what lies beyond.
+  void openDoors() {
+    doorsOpen = true;
+    doors = rollDoors();
+  }
+
+  List<Door> rollDoors() {
+    final next = depth + 1;
+    if (depth >= totalDepth) return [];
+    if (isBossDepth(next)) {
+      return [const Door(Offset(220, 70), Reward.boss)];
+    }
+    final count = random.nextDouble() < .35 ? 3 : 2;
+    // A spirit's gift is always on offer so no path leaves you powerless.
+    final rewards = <Reward>[Reward.gift];
+    const weights = {
+      Reward.gift: 30,
+      Reward.coins: 22,
+      Reward.health: 14,
+      Reward.embers: 12,
+      Reward.shop: 14,
+      Reward.fountain: 8,
+    };
+    final total = weights.values.reduce((a, b) => a + b);
+    while (rewards.length < count) {
+      var roll = random.nextInt(total);
+      var reward = Reward.gift;
+      for (final entry in weights.entries) {
+        roll -= entry.value;
+        if (roll < 0) {
+          reward = entry.key;
+          break;
+        }
+      }
+      final special = reward == Reward.shop || reward == Reward.fountain;
+      if (special && (rewards.contains(reward) || room == reward)) continue;
+      if (reward == Reward.fountain && next < 3) continue;
+      rewards.add(reward);
+    }
+    rewards.shuffle(random);
+    final xs = count == 2 ? const [140.0, 300.0] : const [95.0, 220.0, 345.0];
+    return [
+      for (var i = 0; i < count; i++)
+        Door(
+          Offset(xs[i], 70),
+          rewards[i],
+          elite: isCombat(rewards[i]) && next >= 3 && random.nextDouble() < .2,
         ),
+    ];
+  }
+
+  List<Ware> rollWares() {
+    final scale = biome == 0 ? 1.0 : 1.4;
+    int price(int base) => (base * scale).round();
+    final others = [
+      Ware('dew', 'Fiole de rosée', 'Récupère 40 PV.', price(20)),
+      Ware('heart', 'Cœur de mousse', '+20 PV maximum.', price(35)),
+      Ware('clover', 'Trèfle de lune', '+1 relance de dons.', price(18)),
+      Ware('ember', 'Braise scellée', '+15 braises pour l’autel.', price(25)),
+    ]..shuffle(random);
+    return [
+      Ware('gift', 'Lueur d’esprit', 'Choisis un don parmi trois.', price(45)),
+      ...others.take(2),
+    ];
+  }
+
+  void buy(Ware ware) {
+    if (phase != Phase.shop || ware.sold || coins < ware.price) return;
+    coins -= ware.price;
+    ware.sold = true;
+    events.add(Sfx.buy);
+    switch (ware.id) {
+      case 'gift':
+        phase = Phase.upgrade;
+        choices = rollChoices();
+      case 'dew':
+        hp = min(maxHp, hp + 40);
+      case 'heart':
+        maxHp += 20;
+        hp += 20;
+      case 'clover':
+        rerolls++;
+      case 'ember':
+        emberBonus += 15;
+    }
+  }
+
+  void leaveShop() {
+    if (phase != Phase.shop) return;
+    phase = Phase.playing;
+    shopArmed = false;
+  }
+
+  /// A short burst with invulnerability, in the movement or facing direction.
+  void dash() {
+    if (phase != Phase.playing || grace > 0 || fade > 0) return;
+    if (dashCooldown > 0 || dashing) return;
+    dashDirection = moving ? unit(movement) : facing;
+    dashTime = .17;
+    dashCooldown = .85;
+    events.add(Sfx.dash);
+  }
+
+  void collect(Pickup reward) {
+    pickup = null;
+    final bonus = reward.elite ? 2 : 1;
+    burst(reward.p, count: 16);
+    rings.add(Ring(reward.p, 50, false));
+    switch (reward.reward) {
+      case Reward.gift:
+        phase = Phase.upgrade;
+        choices = rollChoices(reward.elite ? 4 : 3);
+        events.add(Sfx.gift);
+        return;
+      case Reward.coins:
+        coins += 30 * bonus;
+        popups.add(Popup('+${30 * bonus} lucioles', reward.p, true));
+        events.add(Sfx.buy);
+      case Reward.health:
+        maxHp += 15.0 * bonus;
+        hp = min(maxHp, hp + 25.0 * bonus);
+        popups.add(Popup('+${15 * bonus} PV max', reward.p, true));
+        events.add(Sfx.shield);
+      case Reward.embers:
+        emberBonus += 12 * bonus;
+        popups.add(Popup('+${12 * bonus} braises', reward.p, true));
+        events.add(Sfx.buy);
+      default:
+    }
+    openDoors();
+  }
+
+  void dropCoins(Offset p, int count) {
+    for (var i = 0; i < count; i++) {
+      final a = random.nextDouble() * pi * 2;
+      loot.add(
+        Coin(p, Offset(cos(a), sin(a)) * (60 + random.nextDouble() * 90)),
       );
     }
   }
@@ -340,13 +588,13 @@ class RunModel {
     if (phase == Phase.paused) phase = Phase.playing;
   }
 
-  List<Gift> rollChoices() =>
-      (List<Gift>.of(gifts)..shuffle(random)).take(3).toList();
+  List<Gift> rollChoices([int count = 3]) =>
+      (List<Gift>.of(gifts)..shuffle(random)).take(count).toList();
 
   void reroll() {
     if (phase != Phase.upgrade || rerolls <= 0) return;
     rerolls--;
-    choices = rollChoices();
+    choices = rollChoices(choices.length);
   }
 
   void choose(Gift gift) {
@@ -389,9 +637,8 @@ class RunModel {
         regen++;
     }
     events.add(Sfx.gift);
-    wave++;
     phase = Phase.playing;
-    spawnWave();
+    if (cleared && !doorsOpen) openDoors();
   }
 
   void burst(Offset p, {bool green = false, int count = 9}) {
@@ -408,7 +655,7 @@ class RunModel {
   }
 
   void hurt(double amount) {
-    if (invincible > 0 || phase != Phase.playing) return;
+    if (invincible > 0 || dashing || phase != Phase.playing) return;
     if (veilReady) {
       veilReady = false;
       veilTimer = 8 * pow(.7, veil - 1).toDouble();
@@ -485,7 +732,7 @@ class RunModel {
   Enemy spore(Offset p, Offset push) => Enemy(
     p,
     Kind.spore,
-    baseHp(Kind.spore) + wave * 2,
+    baseHp(Kind.spore) + tier * 2,
     1 + random.nextDouble(),
   )..push = push;
 
@@ -513,6 +760,21 @@ class RunModel {
       p.life -= dt * 1.4;
     }
     popups.removeWhere((p) => p.life <= 0);
+    for (final g in ghosts) {
+      g.life -= dt * 4;
+    }
+    ghosts.removeWhere((g) => g.life <= 0);
+    dashCooldown = max(0, dashCooldown - dt);
+    // Walking through a door fades out, loads the next room, then fades in.
+    if (pendingDoor != null) {
+      fade = min(1, fade + dt * 3.5);
+      if (fade >= 1) {
+        loadRoom(pendingDoor!);
+        pendingDoor = null;
+      }
+      return;
+    }
+    if (fade > 0) fade = max(0, fade - dt * 3.5);
     if (grace > 0) {
       grace -= dt;
       return;
@@ -522,9 +784,18 @@ class RunModel {
       veilTimer -= dt;
       if (veilTimer <= 0) veilReady = true;
     }
-    if (moving) player = bounded(player + unit(movement) * speed * dt);
+    if (moving) facing = unit(movement);
+    if (dashing) {
+      dashTime -= dt;
+      player = bounded(player + dashDirection * speed * 3.6 * dt);
+      ghosts.add(Ghost(player));
+    } else if (moving) {
+      player = bounded(player + unit(movement) * speed * dt);
+    }
+    updateRoom(dt);
+    if (phase != Phase.playing || pendingDoor != null) return;
     final target = nearest(player);
-    if (!moving && cooldown <= 0 && target != null) {
+    if (!moving && !dashing && cooldown <= 0 && target != null) {
       final a = atan2(target.p.dy - player.dy, target.p.dx - player.dx);
       for (var i = 0; i < multishot; i++) {
         final angle = a + (i - (multishot - 1) / 2) * .12;
@@ -556,7 +827,7 @@ class RunModel {
       final distance = toPlayer.distance;
       switch (e.kind) {
         case Kind.mushroom:
-          e.p += direction * (31 + min(wave, 8) * 3) * pace * dt;
+          e.p += direction * (31 + min(tier, 8) * 3) * pace * dt;
         case Kind.moth:
           if (distance > 235) e.p += direction * 28 * pace * dt;
           if (distance < 140) e.p -= direction * 24 * pace * dt;
@@ -602,7 +873,7 @@ class RunModel {
           final side = Offset(-direction.dy, direction.dx);
           e.p +=
               (direction + side * sin(elapsed * 6 + e.maxHp) * .6) *
-              (68 + wave * 2) *
+              (68 + tier * 2) *
               pace *
               dt;
         case Kind.toad:
@@ -756,17 +1027,74 @@ class RunModel {
     resolveDeaths();
     bolts.removeWhere((b) => b.life <= 0);
     if (phase != Phase.playing) return;
-    if (enemies.isEmpty) {
-      movement = Offset.zero;
+    if (enemies.isEmpty && !cleared) {
+      cleared = true;
       bolts.clear();
       shells.clear();
-      if (wave == totalWaves) {
+      if (room == Reward.boss && depth == totalDepth) {
         phase = Phase.won;
+        movement = Offset.zero;
         events.add(Sfx.win);
+      } else if (room == Reward.boss) {
+        hp = min(maxHp, hp + maxHp * .4);
+        pickup = Pickup(const Offset(220, 300), Reward.gift, true);
       } else {
-        if (wave == 5) hp = min(maxHp, hp + maxHp * .4);
-        phase = Phase.upgrade;
-        choices = rollChoices();
+        pickup = Pickup(const Offset(220, 300), room, elite);
+      }
+    }
+  }
+
+  /// Fireflies, the reward pedestal, the fountain, the merchant and doors.
+  void updateRoom(double dt) {
+    for (final c in loot) {
+      c.age += dt;
+      c.p = bounded(c.p + c.v * dt, 30);
+      c.v *= max(0, 1 - dt * 4);
+      final toPlayer = player - c.p;
+      // Once the room is safe, the fireflies drift to you on their own.
+      if (cleared && c.age > .4) {
+        c.p += unit(toPlayer) * min(toPlayer.distance, 420 * dt);
+      }
+      if (toPlayer.distance < 22 && c.age > .25) {
+        c.age = -1;
+        coins++;
+        events.add(Sfx.coin);
+      }
+    }
+    loot.removeWhere((c) => c.age < 0);
+    final reward = pickup;
+    if (reward != null && (player - reward.p).distance < 30) collect(reward);
+    if (phase != Phase.playing) return;
+    if (room == Reward.fountain &&
+        !fountainUsed &&
+        (player - fountain).distance < 48) {
+      fountainUsed = true;
+      final heal = maxHp * .35;
+      hp = min(maxHp, hp + heal);
+      rings.add(Ring(fountain, 70, false));
+      popups.add(
+        Popup('+${heal.round()} PV', fountain - const Offset(0, 50), true),
+      );
+      events.add(Sfx.shield);
+    }
+    if (room == Reward.shop) {
+      final distance = (player - merchant).distance;
+      if (shopArmed && distance < 66) {
+        shopArmed = false;
+        phase = Phase.shop;
+        movement = Offset.zero;
+        return;
+      }
+      if (distance > 105) shopArmed = true;
+    }
+    if (doorsOpen && pendingDoor == null) {
+      for (final door in doors) {
+        if ((player.dx - door.p.dx).abs() < 30 && player.dy < 96) {
+          pendingDoor = door;
+          movement = Offset.zero;
+          events.add(Sfx.door);
+          break;
+        }
       }
     }
   }
@@ -782,6 +1110,14 @@ class RunModel {
         events.add(Sfx.kill);
         if (lifesteal > 0) hp = min(maxHp, hp + 2.0 * lifesteal);
         if (e.boss) shake = .7;
+        final drops = e.boss
+            ? 12
+            : e.kind == Kind.broodcap
+            ? 2
+            : e.kind == Kind.spore
+            ? (random.nextDouble() < .35 ? 1 : 0)
+            : 1;
+        dropCoins(e.p, elite ? drops * 2 : drops);
         if (bloom > 0) {
           final reach = 45.0 + 10 * bloom;
           rings.add(Ring(e.p, reach, false));

@@ -205,7 +205,7 @@ class Sound {
     // Rapid-fire cues (hits, shots) are throttled so they never turn to noise.
     final now = _clock.elapsedMilliseconds;
     final gap = switch (sfx) {
-      Sfx.hit || Sfx.crit || Sfx.kill || Sfx.explode => 45,
+      Sfx.hit || Sfx.crit || Sfx.kill || Sfx.explode || Sfx.coin => 45,
       Sfx.shoot => 90,
       _ => 0,
     };
@@ -246,6 +246,18 @@ class Sound {
       case Sfx.win:
         for (final (i, note) in [523.0, 659.0, 784.0, 1047.0, 1319.0].indexed) {
           _tone(note, note, .6, wave: 'triangle', volume: .06, delay: i * .12);
+        }
+      case Sfx.coin:
+        _tone(1320 * pitch, 1760 * pitch, .07, volume: .03);
+      case Sfx.dash:
+        _hiss(.16, 3200, volume: .05);
+        _tone(300, 520, .12, wave: 'triangle', volume: .025);
+      case Sfx.door:
+        _tone(196, 196, .7, wave: 'triangle', volume: .05);
+        _tone(294, 294, .8, volume: .04, delay: .1);
+      case Sfx.buy:
+        for (final (i, note) in [988.0, 1319.0, 1568.0].indexed) {
+          _tone(note, note, .12, volume: .035, delay: i * .05);
         }
       case Sfx.lose:
         for (final (i, note) in [392.0, 330.0, 262.0, 196.0].indexed) {
