@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0d2027">
+  <meta name="description" content="Une petite lanterne, un jardin oublié. Un roguelite de poche jouable au doigt ou au clavier.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="manifest" href="manifest.json">
+  <title>Lanterne — Les jardins du crépuscule</title>
+  <style>html,body{margin:0;background:#0d2027;overscroll-behavior:none;touch-action:none}#loading{position:fixed;inset:0;display:grid;place-content:center;text-align:center;color:#ffd18a;font:16px Georgia,serif}#loading span{font-size:52px;animation:breathe 2s infinite}#loading p{color:#92aba7;font:12px Arial,sans-serif;letter-spacing:2px}@keyframes breathe{50%{opacity:.4;transform:scale(.9)}}</style>
+</head>
+<body>
+  <div id="loading"><span>✦</span><h1>Lanterne</h1><p>LE JARDIN S’ÉVEILLE…</p></div>
+  <script>window.addEventListener('flutter-first-frame',()=>document.getElementById('loading')?.remove());</script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
