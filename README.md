@@ -1,12 +1,12 @@
 # Lanterne — Les jardins du crépuscule
 
-Prototype de roguelite **Flutter + Flame**. Gameplay 2D, représentation en volume dessinée avec Canvas : ombres, sol surélevé et tri des personnages par profondeur. Aucun asset externe requis.
+Prototype de roguelite **Flutter + Flame** en **vue isométrique 2,5D** façon Hades : la simulation reste en 2D, le sol est projeté à 45°, les murs sont extrudés et les personnages dessinés debout, triés par profondeur. Tout est dessiné avec Canvas, aucun asset externe requis. Le jeu se joue en paysage ; sur téléphone, tourner l'appareil.
 
 ## Jouer
 
 Version web : https://Tachfine37.github.io/lanterne-game-test-/
 
-- Mobile : maintenir et glisser le doigt dans le jardin ; relâcher pour tirer ; bouton ⚡ pour esquiver.
+- Mobile (en paysage) : maintenir et glisser le doigt dans le jardin ; relâcher pour tirer ; bouton ⚡ pour esquiver. Les directions suivent l'écran, pas les axes de la salle.
 - Ordinateur : flèches, WASD ou ZQSD ; Espace ou Maj pour esquiver ; P / Échap pour la pause ; M pour couper le son.
 - Structure à la Hades : 12 salles sur 2 biomes (Jardin des murmures, Bassin de lune), chacun terminé par un gardien.
 - Chaque salle vidée laisse sa récompense sur un piédestal ; la prendre ouvre 2 ou 3 portes qui montrent chacune ce qui attend derrière : don d'esprit, lucioles, cœur de rosée (+PV max), braises (anneau bleu : conservées), échoppe ou source de soin. Une porte marquée d'un crâne mène à une salle d'épreuve : plus d'ombres, récompense doublée.
@@ -33,7 +33,7 @@ Le workflow `.github/workflows/pages.yml` vérifie et publie `main`. GitHub Page
 ## Organisation
 
 - `lib/model.dart` : simulation, vagues, ennemis, dons, autel et progression ; aucune dépendance à Flame, mais `dart:ui` pour les vecteurs. Émet des événements sonores (`Sfx`) sans les jouer.
-- `lib/garden_game.dart` : boucle Flame et dessins procéduraux.
+- `lib/garden_game.dart` : boucle Flame, projection isométrique (`iso`, `fromScreen`) et dessins procéduraux : sol projeté, murs extrudés, sprites debout.
 - `lib/main.dart` : interface Flutter, joystick, clavier, pause, autel des braises et stockage local.
 - `lib/audio_web.dart` : synthèse Web Audio des effets et de la musique ; `lib/audio_stub.dart` la remplace hors navigateur (tests, futures versions natives).
 - `test/model_test.dart` : règles de combat, nouveaux ennemis, dons, autel, et un bot qui joue des parties complètes pour détecter les régressions d'équilibrage.

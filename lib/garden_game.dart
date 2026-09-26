@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flame/game.dart';
 import 'package:flutter/painting.dart';
 import 'audio.dart';
@@ -15,9 +16,74 @@ class GardenGame extends Game {
   final shaker = Random();
   double clock = 0, uiClock = 0;
   Offset? stickOrigin, stickEnd;
-  double get scale => min(size.x / 440, size.y / 640);
+  // The room lives in flat world coordinates (440 × 640); the view turns it
+  // 45° and halves its height, like Hades' fixed isometric camera.
+  static const viewW = 1100.0, viewH = 660.0, isoX = 650.0, isoY = 83.0;
+  static const sprite = 1.3, wallHeight = 84.0;
+  static Offset iso(Offset p) =>
+      Offset(p.dx - p.dy + isoX, (p.dx + p.dy) * .5 + isoY);
+  static Offset isoDirection(Offset v) =>
+      Offset(v.dx - v.dy, (v.dx + v.dy) * .5);
+
+  /// Screen-space input (keys, thumb stick) to a world direction, so "up"
+  /// always walks up the screen.
+  static Offset fromScreen(Offset v) =>
+      Offset(.5 * v.dx + v.dy, -.5 * v.dx + v.dy);
+  static final groundMatrix = Float64List.fromList([
+    1, .5, 0, 0, //
+    -1, .5, 0, 0, //
+    0, 0, 1, 0, //
+    isoX, isoY, 0, 1,
+  ]);
+  double get scale => min(size.x / viewW, size.y / viewH);
   Offset get inset =>
-      Offset((size.x - 440 * scale) / 2, (size.y - 640 * scale) / 2);
+      Offset((size.x - viewW * scale) / 2, (size.y - viewH * scale) / 2);
+
+  /// Draws an upright sprite standing on a world position.
+  void standing(
+    Canvas c,
+    Offset world,
+    void Function() draw, {
+    double lift = 0,
+    double size = sprite,
+  }) {
+    final s = iso(world);
+    c.save();
+    c.translate(s.dx, s.dy - lift);
+    c.scale(size);
+    draw();
+    c.restore();
+  }
+
+  /// Draws in the plane of the north wall, centred on world x.
+  void onWall(Canvas c, double x, double floor, void Function() draw) {
+    final base = iso(Offset(x, 57));
+    c.save();
+    c.transform(
+      Float64List.fromList([
+        1,
+        .5,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        base.dx,
+        base.dy,
+        0,
+        1,
+      ]),
+    );
+    c.translate(-x, -floor);
+    draw();
+    c.restore();
+  }
+
   @override
   Color backgroundColor() => const Color(0xFF122C30);
   @override
@@ -89,50 +155,306 @@ class GardenGame extends Game {
     c.save();
     c.translate(inset.dx, inset.dy);
     c.scale(scale);
-    c.clipRect(const Rect.fromLTWH(0, 0, 440, 640));
+    c.clipRect(const Rect.fromLTWH(0, 0, viewW, viewH));
+    final showPreview = run.phase == Phase.title;
+    final moon = !showPreview && run.biome == 1;
+    backdrop(c, moon);
     if (run.shake > 0 && run.phase == Phase.playing) {
-      final power = run.shake * 9;
+      final power = run.shake * 16;
       c.translate(
         (shaker.nextDouble() - .5) * power,
         (shaker.nextDouble() - .5) * power,
       );
     }
+    // Everything lying on the floor is drawn in room coordinates and
+    // projected, so circles become the flattened ellipses of the iso view.
+    c.save();
+    c.transform(groundMatrix);
     garden(c);
-    final showPreview = run.phase == Phase.title;
-    final actors = <({double y, void Function() draw})>[
-      (y: run.player.dy, draw: () => hero(c, run.player)),
-      for (final e in run.enemies) (y: e.p.dy, draw: () => enemy(c, e)),
-      if (run.room == Reward.shop && !showPreview)
-        (y: RunModel.merchant.dy, draw: () => merchant(c)),
-      if (run.pickup case final reward?)
-        (y: reward.p.dy, draw: () => pedestal(c, reward)),
-      if (showPreview) ...[
-        (y: 200, draw: () => preview(c, const Offset(95, 200), Kind.mushroom)),
-        (y: 220, draw: () => preview(c, const Offset(345, 220), Kind.moth)),
-        (y: 475, draw: () => preview(c, const Offset(330, 475), Kind.beetle)),
-      ],
-    ]..sort((a, b) => a.y.compareTo(b.y));
-    if (!showPreview) {
-      for (final door in run.doors) {
-        doorway(c, door);
-      }
-      if (run.room == Reward.fountain) spring(c);
+    groundEffects(c, showPreview);
+    c.restore();
+    backWalls(c, moon);
+    final doors = showPreview ? const <Door>[] : run.doors;
+    if (!doors.any((d) => d.p.dx == 220)) {
+      onWall(c, 220, 76, () => shrine(c));
+    }
+    for (final door in doors) {
+      onWall(c, door.p.dx, 98, () => doorArch(c, door));
+      standing(c, Offset(door.p.dx, 57), () => doorSign(c, door), lift: 46);
+    }
+    for (var i = 0; i < 7; i++) {
+      standing(
+        c,
+        Offset(27, 110 + i * 78.0),
+        () => leaf(c, Offset.zero, i.toDouble(), .7 + (i % 3) * .15),
+      );
     }
     for (final coin in run.loot) {
-      final p = coin.p - Offset(0, 8 + sin(clock * 6 + coin.p.dx) * 2);
-      glow(c, p, 12, gold);
-      circle(c, p, 3.2, gold);
-      circle(c, p, 1.3, const Color(0xFFFFF7E0));
+      standing(c, coin.p, () {
+        glow(c, Offset.zero, 12, gold);
+        circle(c, Offset.zero, 3.2, gold);
+        circle(c, Offset.zero, 1.3, const Color(0xFFFFF7E0));
+      }, lift: 10 + sin(clock * 6 + coin.p.dx) * 3);
     }
     for (final g in run.ghosts) {
-      oval(
+      standing(
         c,
-        g.p.dx,
-        g.p.dy - 18,
-        24,
-        32,
-        gold.withValues(alpha: g.life.clamp(0, 1) * .3),
+        g.p,
+        () => oval(
+          c,
+          0,
+          -18,
+          24,
+          32,
+          gold.withValues(alpha: g.life.clamp(0, 1) * .3),
+        ),
       );
+    }
+    double depth(Offset p) => p.dx + p.dy;
+    final actors = <({double y, void Function() draw})>[
+      (
+        y: depth(run.player),
+        draw: () => standing(c, run.player, () => hero(c, Offset.zero)),
+      ),
+      for (final e in run.enemies)
+        (y: depth(e.p), draw: () => standing(c, e.p, () => enemy(c, e))),
+      if (run.room == Reward.shop && !showPreview)
+        (
+          y: depth(RunModel.merchant),
+          draw: () => standing(c, RunModel.merchant, () => merchant(c)),
+        ),
+      if (run.room == Reward.fountain && !showPreview)
+        (
+          y: depth(RunModel.fountain),
+          draw: () => standing(c, RunModel.fountain, () => spring(c)),
+        ),
+      if (run.pickup case final reward?)
+        (
+          y: depth(reward.p),
+          draw: () => standing(c, reward.p, () => pedestal(c, reward)),
+        ),
+      for (final p in const [
+        Offset(46, 90),
+        Offset(400, 88),
+        Offset(40, 590),
+        Offset(402, 592),
+      ])
+        (
+          y: depth(p),
+          draw: () => standing(c, p, () => lantern(c, Offset.zero)),
+        ),
+      if (showPreview) ...[
+        for (final (p, kind) in const [
+          (Offset(95, 200), Kind.mushroom),
+          (Offset(345, 220), Kind.moth),
+          (Offset(330, 475), Kind.beetle),
+        ])
+          (
+            y: depth(p),
+            draw: () => standing(c, p, () => enemy(c, Enemy(p, kind, 30, 2))),
+          ),
+      ],
+    ]..sort((a, b) => a.y.compareTo(b.y));
+    for (final actor in actors) {
+      actor.draw();
+    }
+    for (final s in run.shells) {
+      final k = s.progress;
+      standing(c, Offset.lerp(s.from, s.to, k)!, () {
+        glow(c, Offset.zero, 18, const Color(0xFFFFB07A));
+        circle(c, Offset.zero, 7, const Color(0xFFE08A5A));
+        circle(c, const Offset(-2, -2), 3, const Color(0xFFFFE3B8));
+      }, lift: 12 + sin(k * pi) * 110);
+    }
+    for (final b in run.bolts) {
+      final color = b.hostile ? const Color(0xFFFF938C) : gold;
+      final tail = unit(isoDirection(b.v)) * (b.hostile ? 8 : 14);
+      standing(c, b.p, () {
+        line(
+          c,
+          Offset.zero,
+          -tail,
+          color.withValues(alpha: .4),
+          b.hostile ? 7 : 5,
+        );
+        glow(c, Offset.zero, 15, color);
+        circle(c, Offset.zero, b.hostile ? 5 : 4, color);
+        circle(c, Offset.zero, 2, const Color(0xFFFFF5DD));
+      }, lift: 16);
+    }
+    for (var i = 0; i < run.orbits; i++) {
+      final a = run.orbitClock * 3 + i * pi * 2 / run.orbits;
+      standing(c, run.player + Offset(cos(a), sin(a)) * 52, () {
+        glow(c, Offset.zero, 22, mint);
+        circle(c, Offset.zero, 6, mint);
+        circle(c, Offset.zero, 2, const Color(0xFFFFFFFF));
+      }, lift: 16);
+    }
+    for (final s in run.sparks) {
+      standing(
+        c,
+        s.p,
+        () => circle(
+          c,
+          Offset.zero,
+          max(0, s.life) * 3,
+          (s.green ? mint : gold).withValues(alpha: s.life.clamp(0, 1)),
+        ),
+        lift: 14,
+      );
+    }
+    for (final p in run.popups) {
+      standing(
+        c,
+        p.p,
+        () => label(
+          c,
+          p.crit ? '${p.text}!' : p.text,
+          Offset.zero,
+          p.crit ? 17 : 12,
+          (p.crit ? const Color(0xFFFFB45E) : const Color(0xFFFFF1D6))
+              .withValues(alpha: p.life.clamp(0, 1)),
+        ),
+        lift: 52 + (1 - p.life) * 34,
+      );
+    }
+    // Drifting fireflies, then the low front rim and foliage framing the room.
+    for (var i = 0; i < 18; i++) {
+      final x = 30.0 + (i * 97) % 380 + sin(clock * .5 + i) * 9;
+      final y = 90.0 + (i * 137) % 500 + cos(clock * .4 + i) * 8;
+      standing(
+        c,
+        Offset(x, y),
+        () => circle(
+          c,
+          Offset.zero,
+          1.5,
+          mint.withValues(alpha: .2 + (.5 + .5 * sin(clock + i)) * .45),
+        ),
+        lift: 30 + sin(clock + i) * 8,
+      );
+    }
+    frontRim(c, moon);
+    for (var i = 0; i < 6; i++) {
+      standing(
+        c,
+        Offset(60 + i * 68.0, 622),
+        () => leaf(c, Offset.zero, i.toDouble(), .8),
+      );
+      standing(
+        c,
+        Offset(436, 110 + i * 88.0),
+        () => leaf(c, Offset.zero, i + 3.0, .75),
+      );
+    }
+    if (run.phase == Phase.playing && run.grace > 0) {
+      rect(
+        c,
+        Rect.fromCenter(center: const Offset(550, 300), width: 430, height: 96),
+        const Color(0xE6153033),
+        22,
+      );
+      label(
+        c,
+        switch (run.room) {
+          Reward.boss when run.depth == totalDepth => 'MINUIT APPROCHE',
+          Reward.boss => 'LE SANCTUAIRE S’ÉVEILLE',
+          Reward.shop => 'L’ÉCHOPPE',
+          Reward.fountain => 'LA SOURCE',
+          _ => 'SALLE ${run.depth}${run.elite ? '  ·  ÉPREUVE' : ''}',
+        },
+        const Offset(550, 284),
+        25,
+        run.elite ? const Color(0xFFFF9F86) : gold,
+      );
+      label(
+        c,
+        switch (run.room) {
+          Reward.boss => 'Garde tes distances.',
+          Reward.shop => 'Approche-toi de Maître Crapaud.',
+          Reward.fountain => 'Bois à la source pour te soigner.',
+          _ when run.elite => 'Plus d’ombres, récompense doublée.',
+          _ when run.depth == roomsPerBiome + 1 => 'Le bassin de lune s’ouvre.',
+          _ => 'Récompense : ${rewardNames[run.room]}',
+        },
+        const Offset(550, 320),
+        16,
+        mint,
+      );
+    }
+    vignette(c);
+    if (run.fade > 0) {
+      c.drawRect(
+        const Rect.fromLTWH(-40, -40, viewW + 80, viewH + 80),
+        Paint()..color = const Color(0xFF0D2027).withValues(alpha: run.fade),
+      );
+    }
+    c.restore();
+    // The thumb stick is drawn in screen space, where the finger is.
+    if (stickOrigin != null && run.phase == Phase.playing) {
+      final a = stickOrigin!, b = stickEnd!;
+      circle(c, a, 38, const Color(0x22FFFFFF));
+      c.drawCircle(
+        a,
+        38,
+        Paint()
+          ..color = const Color(0x55FFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+      circle(
+        c,
+        a + unit(b - a) * min(28, (b - a).distance),
+        15,
+        const Color(0x99FFDFAC),
+      );
+    }
+  }
+
+  void backdrop(Canvas c, bool moon) {
+    const area = Rect.fromLTWH(0, 0, viewW, viewH);
+    c.drawRect(
+      area,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(0, -.1),
+          radius: .9,
+          colors: moon
+              ? const [Color(0xFF1B2744), Color(0xFF080C19)]
+              : const [Color(0xFF1C3836), Color(0xFF061215)],
+        ).createShader(area),
+    );
+  }
+
+  void vignette(Canvas c) {
+    const area = Rect.fromLTWH(0, 0, viewW, viewH);
+    c.drawRect(
+      area,
+      Paint()
+        ..shader = const RadialGradient(
+          radius: .85,
+          colors: [Color(0x00000000), Color(0x00000000), Color(0x8C02080A)],
+          stops: [0, .6, 1],
+        ).createShader(area),
+    );
+  }
+
+  /// Floor-level effects: the lantern's light pool, telegraphs, impacts.
+  void groundEffects(Canvas c, bool showPreview) {
+    c.drawCircle(
+      run.player,
+      150,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [gold.withValues(alpha: .16), gold.withValues(alpha: 0)],
+        ).createShader(Rect.fromCircle(center: run.player, radius: 150)),
+    );
+    if (!showPreview) {
+      for (final door in run.doors) {
+        final tint = rewardColor(door.reward, elite: door.elite);
+        final breathe = .75 + sin(clock * 3 + door.p.dx) * .25;
+        oval(c, door.p.dx, 78, 60, 34, tint.withValues(alpha: .22 * breathe));
+      }
     }
     for (final e in run.enemies) {
       if (e.tell > 0 && e.kind != Kind.toad) {
@@ -157,7 +479,6 @@ class GardenGame extends Game {
       }
     }
     for (final s in run.shells) {
-      final k = s.progress;
       c.drawCircle(
         s.to,
         34,
@@ -166,22 +487,12 @@ class GardenGame extends Game {
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2,
       );
-      circle(c, s.to, 34 * k, const Color(0x33FF8E81));
-    }
-    for (final actor in actors) {
-      actor.draw();
-    }
-    for (final s in run.shells) {
-      final p = s.position - const Offset(0, 10);
-      glow(c, p, 18, const Color(0xFFFFB07A));
-      circle(c, p, 7, const Color(0xFFE08A5A));
-      circle(c, p - const Offset(2, 2), 3, const Color(0xFFFFE3B8));
+      circle(c, s.to, 34 * s.progress, const Color(0x33FF8E81));
     }
     for (final r in run.rings) {
-      final k = 1 - r.life;
       c.drawCircle(
-        r.p - const Offset(0, 8),
-        r.size * (.35 + .65 * k),
+        r.p,
+        r.size * (.35 + .65 * (1 - r.life)),
         Paint()
           ..color = (r.hostile ? const Color(0xFFFF9F86) : gold).withValues(
             alpha: r.life.clamp(0, 1) * .8,
@@ -190,137 +501,87 @@ class GardenGame extends Game {
           ..strokeWidth = 5 * r.life + 1,
       );
     }
-    for (final b in run.bolts) {
-      final color = b.hostile ? const Color(0xFFFF938C) : gold;
-      final p = b.p - const Offset(0, 12);
-      line(
-        c,
-        p,
-        p - unit(b.v) * (b.hostile ? 8 : 14),
-        color.withValues(alpha: .4),
-        b.hostile ? 7 : 5,
-      );
-      glow(c, p, 15, color);
-      circle(c, p, b.hostile ? 5 : 4, color);
-      circle(c, p, 2, const Color(0xFFFFF5DD));
+  }
+
+  /// An extruded stone wall between two floor points.
+  void wall(Canvas c, Offset a, Offset b, double h, Color color, Color cap) {
+    final pa = iso(a), pb = iso(b);
+    final face = Path()
+      ..moveTo(pa.dx, pa.dy)
+      ..lineTo(pb.dx, pb.dy)
+      ..lineTo(pb.dx, pb.dy - h)
+      ..lineTo(pa.dx, pa.dy - h)
+      ..close();
+    c.drawPath(
+      face,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [Color.lerp(color, const Color(0xFF000000), .45)!, color],
+        ).createShader(face.getBounds()),
+    );
+    final courses = max(1, (h / 20).round());
+    final steps = max(2, ((b - a).distance / 46).round());
+    for (var k = 0; k < courses; k++) {
+      final y0 = h * k / courses, y1 = h * (k + 1) / courses;
+      if (k > 0) {
+        line(
+          c,
+          pa - Offset(0, y0),
+          pb - Offset(0, y0),
+          const Color(0x26000000),
+          1.2,
+        );
+      }
+      for (var i = 1; i < steps; i++) {
+        final t = (i + (k.isOdd ? .5 : 0)) / steps;
+        if (t >= 1) continue;
+        final q = Offset.lerp(pa, pb, t)!;
+        line(
+          c,
+          q - Offset(0, y0),
+          q - Offset(0, y1),
+          const Color(0x1C000000),
+          1,
+        );
+      }
     }
-    for (var i = 0; i < run.orbits; i++) {
-      final a = run.orbitClock * 3 + i * pi * 2 / run.orbits;
-      final p = run.player + Offset(cos(a), sin(a)) * 52 - const Offset(0, 12);
-      glow(c, p, 22, mint);
-      circle(c, p, 6, mint);
-      circle(c, p, 2, const Color(0xFFFFFFFF));
-    }
-    for (final s in run.sparks) {
-      circle(
-        c,
-        s.p - const Offset(0, 10),
-        max(0, s.life) * 3,
-        (s.green ? mint : gold).withValues(alpha: s.life.clamp(0, 1)),
-      );
-    }
-    for (final p in run.popups) {
-      label(
-        c,
-        p.crit ? '${p.text}!' : p.text,
-        p.p,
-        p.crit ? 17 : 12,
-        (p.crit ? const Color(0xFFFFB45E) : const Color(0xFFFFF1D6)).withValues(
-          alpha: p.life.clamp(0, 1),
-        ),
-      );
-    }
-    // Fireflies and foreground foliage frame the playable area.
-    for (var i = 0; i < 15; i++) {
-      final x = 25.0 + (i * 97) % 395 + sin(clock * .5 + i) * 9;
-      final y = 85.0 + (i * 137) % 490 + cos(clock * .4 + i) * 8;
-      circle(
-        c,
-        Offset(x, y),
-        1.4,
-        mint.withValues(alpha: .2 + (.5 + .5 * sin(clock + i)) * .45),
-      );
-    }
-    for (var i = 0; i < 9; i++) {
-      leaf(c, Offset(i * 58.0 - 10, 637), i.toDouble(), 1.2);
-    }
-    if (run.phase == Phase.playing && run.grace > 0) {
-      rect(
-        c,
-        const Rect.fromLTWH(76, 268, 288, 78),
-        const Color(0xE6153033),
-        18,
-      );
-      label(
-        c,
-        switch (run.room) {
-          Reward.boss when run.depth == totalDepth => 'MINUIT APPROCHE',
-          Reward.boss => 'LE SANCTUAIRE S’ÉVEILLE',
-          Reward.shop => 'L’ÉCHOPPE',
-          Reward.fountain => 'LA SOURCE',
-          _ => 'SALLE ${run.depth}${run.elite ? '  ·  ÉPREUVE' : ''}',
-        },
-        const Offset(220, 296),
-        18,
-        run.elite ? const Color(0xFFFF9F86) : gold,
-      );
-      label(
-        c,
-        switch (run.room) {
-          Reward.boss => 'Garde tes distances.',
-          Reward.shop => 'Approche-toi de Maître Crapaud.',
-          Reward.fountain => 'Bois à la source pour te soigner.',
-          _ when run.elite => 'Plus d’ombres, récompense doublée.',
-          _ when run.depth == roomsPerBiome + 1 => 'Le bassin de lune s’ouvre.',
-          _ => 'Récompense : ${rewardNames[run.room]}',
-        },
-        const Offset(220, 323),
-        13,
-        mint,
-      );
-    }
-    if (stickOrigin != null && run.phase == Phase.playing) {
-      final a = (stickOrigin! - inset) / scale;
-      final b = (stickEnd! - inset) / scale;
-      circle(c, a, 38, const Color(0x22FFFFFF));
-      c.drawCircle(
-        a,
-        38,
-        Paint()
-          ..color = const Color(0x55FFFFFF)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1,
-      );
-      circle(
-        c,
-        a + unit(b - a) * min(28, (b - a).distance),
-        15,
-        const Color(0x99FFDFAC),
-      );
-    }
-    if (run.fade > 0) {
-      c.drawRect(
-        const Rect.fromLTWH(-40, -40, 520, 720),
-        Paint()..color = const Color(0xFF0D2027).withValues(alpha: run.fade),
-      );
-    }
-    c.restore();
+    line(c, pa - Offset(0, h), pb - Offset(0, h), cap, 5);
+    line(
+      c,
+      pa - Offset(0, h - 3),
+      pb - Offset(0, h - 3),
+      const Color(0x33000000),
+      2,
+    );
+  }
+
+  void backWalls(Canvas c, bool moon) {
+    final lit = moon ? const Color(0xFF465580) : const Color(0xFF3F5E55);
+    final shade = moon ? const Color(0xFF323D63) : const Color(0xFF2E4842);
+    final cap = moon ? const Color(0xFF7686B5) : const Color(0xFF6C8C7C);
+    wall(
+      c,
+      const Offset(20, 607),
+      const Offset(20, 57),
+      wallHeight,
+      shade,
+      cap,
+    );
+    wall(c, const Offset(20, 57), const Offset(420, 57), wallHeight, lit, cap);
+  }
+
+  void frontRim(Canvas c, bool moon) {
+    final color = moon ? const Color(0xFF28324F) : const Color(0xFF223B36);
+    final cap = moon ? const Color(0xFF55648F) : const Color(0xFF4F6D60);
+    wall(c, const Offset(20, 607), const Offset(420, 607), 16, color, cap);
+    wall(c, const Offset(420, 607), const Offset(420, 57), 16, color, cap);
   }
 
   void garden(Canvas c) {
     final moon = run.phase != Phase.title && run.biome == 1;
     final accent = moon ? const Color(0xFFA9B8FF) : const Color(0xFF3ED8B1);
-    c.drawRect(
-      const Rect.fromLTWH(0, 0, 440, 640),
-      Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: moon
-              ? const [Color(0xFF161F38), Color(0xFF22304F), Color(0xFF121B30)]
-              : const [Color(0xFF162C34), Color(0xFF254640), Color(0xFF132F32)],
-        ).createShader(const Rect.fromLTWH(0, 0, 440, 640)),
-    );
     // Raised stone edging and staggered, mossy (or moonlit) paving.
     rect(
       c,
@@ -424,25 +685,6 @@ class GardenGame extends Game {
         center + Offset(cos(a), sin(a)) * 95,
         3,
         accent.withValues(alpha: .19),
-      );
-    }
-    // Distant shrine, moonstone door and lanterns.
-    final centerDoor = run.doors.any((d) => d.p.dx == 220);
-    if (!centerDoor) shrine(c);
-    for (final p in [
-      const Offset(46, 102),
-      const Offset(394, 102),
-      const Offset(43, 567),
-      const Offset(397, 567),
-    ]) {
-      lantern(c, p);
-    }
-    for (var i = 0; i < 12; i++) {
-      leaf(
-        c,
-        Offset(i.isEven ? 12 : 430, 100 + i * 45.0),
-        i.toDouble(),
-        .8 + (i % 3) * .2,
       );
     }
     decorations(c);
@@ -612,33 +854,35 @@ class GardenGame extends Game {
   }
 
   /// A stone archway on the north wall; its light and icon show the reward.
-  void doorway(Canvas c, Door door) {
+  /// The stone archway itself, drawn in the plane of the north wall.
+  void doorArch(Canvas c, Door door) {
     final x = door.p.dx;
     final tint = rewardColor(door.reward, elite: door.elite);
     final breathe = .75 + sin(clock * 3 + x) * .25;
-    oval(c, x, 96, 74, 18, const Color(0x6605141D));
-    rect(c, Rect.fromLTWH(x - 33, 22, 66, 76), const Color(0xFF1A3036), 30);
-    rect(c, Rect.fromLTWH(x - 29, 18, 58, 76), const Color(0xFF4E6A60), 28);
-    rect(c, Rect.fromLTWH(x - 21, 28, 42, 66), const Color(0xFF0E1D22), 21);
-    glow(c, Offset(x, 70), 46, tint.withValues(alpha: breathe));
+    rect(c, Rect.fromLTWH(x - 34, 16, 68, 84), const Color(0xFF1A3036), 32);
+    rect(c, Rect.fromLTWH(x - 30, 12, 60, 86), const Color(0xFF55736A), 30);
+    rect(c, Rect.fromLTWH(x - 22, 24, 44, 74), const Color(0xFF0B171B), 22);
+    glow(c, Offset(x, 70), 50, tint.withValues(alpha: breathe));
+  }
+
+  /// The floating reward sign in front of a door: ring, icon, elite skull.
+  void doorSign(Canvas c, Door door) {
+    final tint = rewardColor(door.reward, elite: door.elite);
+    final bob = sin(clock * 2.5 + door.p.dx) * 1.5;
     c.drawCircle(
-      Offset(x, 56),
-      17,
+      Offset(0, bob),
+      15,
       Paint()
         ..color = tint.withValues(alpha: .85)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5,
+        ..strokeWidth = 2.2,
     );
-    rewardIcon(c, Offset(x, 56 + sin(clock * 2.5 + x) * 1.5), door.reward, 9);
-    if (door.elite) {
-      rewardIcon(c, Offset(x + 20, 34), Reward.boss, 5);
-    }
-    // Light spilling onto the paving invites the player through.
-    oval(c, x, 104, 46, 12, tint.withValues(alpha: .18 * breathe));
+    rewardIcon(c, Offset(0, bob), door.reward, 8);
+    if (door.elite) rewardIcon(c, const Offset(17, -17), Reward.boss, 4.5);
   }
 
   void pedestal(Canvas c, Pickup reward) {
-    final p = reward.p;
+    const p = Offset.zero;
     final lift = sin(clock * 2.4) * 3;
     oval(c, p.dx, p.dy + 4, 50, 16, const Color(0x66061318));
     rect(
@@ -661,7 +905,7 @@ class GardenGame extends Game {
   }
 
   void spring(Canvas c) {
-    const p = RunModel.fountain;
+    const p = Offset.zero;
     final full = !run.fountainUsed;
     oval(c, p.dx, p.dy + 10, 112, 40, const Color(0x66061318));
     oval(c, p.dx, p.dy, 104, 46, const Color(0xFF4E6A60));
@@ -696,7 +940,7 @@ class GardenGame extends Game {
 
   /// Maître Crapaud: a merchant toad in a violet cloak, lantern in hand.
   void merchant(Canvas c) {
-    const p = RunModel.merchant;
+    const p = Offset.zero;
     final bob = sin(clock * 1.6) * 1.5;
     oval(c, p.dx, p.dy + 6, 120, 34, const Color(0xFF3B2F55));
     oval(c, p.dx, p.dy + 4, 104, 26, const Color(0xFF55457A));
@@ -753,7 +997,7 @@ class GardenGame extends Game {
     glow(c, const Offset(30, -64), 30, gold);
     rect(c, const Rect.fromLTWH(24, -72, 12, 14), const Color(0xFFFFE7A7), 3);
     c.restore();
-    if (run.shopArmed && (run.player - p).distance < 160) {
+    if (run.shopArmed && (run.player - RunModel.merchant).distance < 160) {
       rect(
         c,
         Rect.fromCenter(
@@ -878,12 +1122,8 @@ class GardenGame extends Game {
     c.restore();
   }
 
-  void preview(Canvas c, Offset p, Kind kind) =>
-      enemy(c, Enemy(p, kind, 30, 2));
-
   void enemy(Canvas c, Enemy e) {
     c.save();
-    c.translate(e.p.dx, e.p.dy);
     final bob = sin(clock * 3 + e.p.dx) * 2;
     final shadow = switch (e.kind) {
       Kind.tortoise || Kind.owl => 72.0,

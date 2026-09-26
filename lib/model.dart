@@ -704,7 +704,7 @@ class RunModel {
     popups.add(
       Popup(
         '${amount.round()}',
-        e.p - Offset(random.nextDouble() * 16 - 8, e.radius + 22),
+        e.p + Offset(random.nextDouble() * 16 - 8, 0),
         crit,
       ),
     );
@@ -756,7 +756,6 @@ class RunModel {
     }
     rings.removeWhere((r) => r.life <= 0);
     for (final p in popups) {
-      p.p -= Offset(0, 28 * dt);
       p.life -= dt * 1.4;
     }
     popups.removeWhere((p) => p.life <= 0);
@@ -1072,9 +1071,7 @@ class RunModel {
       final heal = maxHp * .35;
       hp = min(maxHp, hp + heal);
       rings.add(Ring(fountain, 70, false));
-      popups.add(
-        Popup('+${heal.round()} PV', fountain - const Offset(0, 50), true),
-      );
+      popups.add(Popup('+${heal.round()} PV', fountain, true));
       events.add(Sfx.shield);
     }
     if (room == Reward.shop) {

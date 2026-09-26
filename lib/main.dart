@@ -197,25 +197,29 @@ class _GardenScreenState extends State<GardenScreen>
     }
     if (run.phase == Phase.playing && pointer == null) {
       bool has(List<LogicalKeyboardKey> values) => values.any(keys.contains);
-      run.movement = Offset(
-        (has([LogicalKeyboardKey.arrowRight, LogicalKeyboardKey.keyD])
-                ? 1
-                : 0) -
-            (has([
-                  LogicalKeyboardKey.arrowLeft,
-                  LogicalKeyboardKey.keyA,
-                  LogicalKeyboardKey.keyQ,
-                ])
-                ? 1
-                : 0),
-        (has([LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.keyS]) ? 1 : 0) -
-            (has([
-                  LogicalKeyboardKey.arrowUp,
-                  LogicalKeyboardKey.keyW,
-                  LogicalKeyboardKey.keyZ,
-                ])
-                ? 1
-                : 0),
+      run.movement = GardenGame.fromScreen(
+        Offset(
+          (has([LogicalKeyboardKey.arrowRight, LogicalKeyboardKey.keyD])
+                  ? 1
+                  : 0) -
+              (has([
+                    LogicalKeyboardKey.arrowLeft,
+                    LogicalKeyboardKey.keyA,
+                    LogicalKeyboardKey.keyQ,
+                  ])
+                  ? 1
+                  : 0),
+          (has([LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.keyS])
+                  ? 1
+                  : 0) -
+              (has([
+                    LogicalKeyboardKey.arrowUp,
+                    LogicalKeyboardKey.keyW,
+                    LogicalKeyboardKey.keyZ,
+                  ])
+                  ? 1
+                  : 0),
+        ),
       );
     }
     return KeyEventResult.handled;
@@ -242,64 +246,74 @@ class _GardenScreenState extends State<GardenScreen>
           ),
         ),
         child: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, box) {
-              final wide = box.maxWidth >= 980;
-              return Column(
-                children: [
-                  if (wide) header(),
-                  Expanded(
-                    child: wide
-                        ? Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(width: 244, child: leftPanel()),
-                              const SizedBox(width: 40),
-                              Flexible(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 18,
+          child: Stack(
+            children: [
+              LayoutBuilder(
+                builder: (context, box) {
+                  final wide = box.maxWidth >= 1300;
+                  return Column(
+                    children: [
+                      if (wide) header(),
+                      Expanded(
+                        child: wide
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(width: 244, child: leftPanel()),
+                                  const SizedBox(width: 40),
+                                  Flexible(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 18,
+                                      ),
+                                      child: gamePanel(),
+                                    ),
                                   ),
-                                  child: gamePanel(),
+                                  const SizedBox(width: 40),
+                                  SizedBox(width: 222, child: rightPanel()),
+                                ],
+                              )
+                            : Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
                                 ),
+                                child: gamePanel(),
                               ),
-                              const SizedBox(width: 40),
-                              SizedBox(width: 222, child: rightPanel()),
-                            ],
-                          )
-                        : Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: gamePanel(),
-                          ),
-                  ),
-                  if (wide)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          small(
-                            'UN PETIT MONDE. UNE GRANDE LUMIÈRE.',
-                            spacing: 2,
-                          ),
-                          small(
-                            'PROTOTYPE 01  ·  FLUTTER + FLAME',
-                            spacing: 1.5,
-                          ),
-                        ],
                       ),
-                    ),
-                ],
-              );
-            },
+                      if (wide)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              small(
+                                'UN PETIT MONDE. UNE GRANDE LUMIÈRE.',
+                                spacing: 2,
+                              ),
+                              small(
+                                'PROTOTYPE 01  ·  FLUTTER + FLAME',
+                                spacing: 1.5,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+              // A portrait phone is too narrow for menus inside the landscape
+              // room, so they take the whole screen there.
+              if (run.phase != Phase.playing && portrait)
+                Positioned.fill(child: overlay()),
+            ],
           ),
         ),
       ),
     ),
   );
+
+  bool get portrait => MediaQuery.sizeOf(context).aspectRatio < .9;
 
   Widget small(String s, {Color color = muted, double spacing = 0}) => Text(
     s,
@@ -550,7 +564,7 @@ class _GardenScreenState extends State<GardenScreen>
 
   Widget gamePanel() => Center(
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 480),
+      constraints: const BoxConstraints(maxWidth: 1000),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -656,7 +670,7 @@ class _GardenScreenState extends State<GardenScreen>
           ),
           Flexible(
             child: AspectRatio(
-              aspectRatio: 440 / 640,
+              aspectRatio: GardenGame.viewW / GardenGame.viewH,
               child: ClipRRect(
                 borderRadius: const BorderRadius.vertical(
                   bottom: Radius.circular(18),
@@ -683,7 +697,7 @@ class _GardenScreenState extends State<GardenScreen>
                         final delta = e.localPosition - game.stickOrigin!;
                         run.movement = delta.distance < 7
                             ? Offset.zero
-                            : unit(delta);
+                            : GardenGame.fromScreen(unit(delta));
                       },
                       onPointerUp: (e) {
                         if (e.pointer == pointer) clearInput();
@@ -787,7 +801,7 @@ class _GardenScreenState extends State<GardenScreen>
                           ),
                         ),
                       ),
-                    if (run.phase != Phase.playing) overlay(),
+                    if (run.phase != Phase.playing && !portrait) overlay(),
                   ],
                 ),
               ),
@@ -796,7 +810,9 @@ class _GardenScreenState extends State<GardenScreen>
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 2),
             child: small(
-              run.phase == Phase.playing
+              MediaQuery.sizeOf(context).aspectRatio < 1
+                  ? '↻  TOURNE TON TÉLÉPHONE POUR JOUER EN GRAND'
+                  : run.phase == Phase.playing
                   ? '${run.moving ? 'EN MOUVEMENT' : 'TIR AUTOMATIQUE'}   ·   ${run.acquired.length} DONS   ·   ${run.coins} LUCIOLES'
                   : 'UNE EXPÉDITION À LA LUEUR DES LANTERNES',
               spacing: 1.2,
@@ -841,217 +857,227 @@ class _GardenScreenState extends State<GardenScreen>
   Widget overlay() {
     final title = run.phase == Phase.title;
     return Container(
-      color: ink.withValues(alpha: title ? .48 : .86),
+      color: ink.withValues(alpha: portrait ? .96 : (title ? .48 : .86)),
       child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(27),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (altar)
-                ...altarView()
-              else if (title) ...[
-                Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: gold.withValues(alpha: .09),
-                    border: Border.all(color: gold.withValues(alpha: .25)),
-                  ),
-                  child: const Icon(Icons.flare_rounded, color: gold, size: 40),
-                ),
-                const SizedBox(height: 24),
-                small('LES JARDINS DU CRÉPUSCULE', color: mint, spacing: 2.1),
-                const SizedBox(height: 12),
-                heading('Lanterne', size: 58),
-                const SizedBox(height: 18),
-                const Text(
-                  'Même la plus petite lumière\npeut réveiller un monde.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFFE0E7D9),
-                    height: 1.7,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 34),
-                button('Entrer dans le jardin', start),
-                const SizedBox(height: 16),
-                small(
-                  'Glisse pour esquiver. Arrête-toi pour attaquer.',
-                  color: const Color(0xFFC5D6CC),
-                ),
-                const SizedBox(height: 5),
-                small(
-                  'Clavier : flèches / ZQSD  ·  Espace : esquive  ·  M : son',
-                ),
-                const SizedBox(height: 18),
-                secondary(
-                  'Autel des braises  ·  $embers',
-                  () => setState(() => altar = true),
-                  icon: Icons.local_fire_department_rounded,
-                ),
-              ] else if (run.phase == Phase.upgrade) ...[
-                const Icon(Icons.auto_awesome, color: gold, size: 32),
-                const SizedBox(height: 12),
-                small(
-                  run.room == Reward.boss
-                      ? 'LE GARDIEN EST TOMBÉ'
-                      : run.room == Reward.shop
-                      ? 'MAÎTRE CRAPAUD'
-                      : 'SALLE ${run.depth} TRAVERSÉE',
-                  color: mint,
-                  spacing: 2,
-                ),
-                const SizedBox(height: 10),
-                heading(
-                  run.room == Reward.boss
-                      ? 'Le bassin de lune\ns’ouvre à toi.'
-                      : 'Fais grandir\nta lumière.',
-                  size: 33,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  run.room == Reward.boss
-                      ? 'Tu reprends des forces. Choisis un don.'
-                      : 'Choisis un don pour la suite du voyage.',
-                  style: const TextStyle(color: muted, fontSize: 12),
-                ),
-                const SizedBox(height: 22),
-                for (final gift in run.choices)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: OutlinedButton(
-                      onPressed: () {
-                        clearInput();
-                        setState(() => run.choose(gift));
-                        focus.requestFocus();
-                      },
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: const Color(0xFF223D40),
-                        foregroundColor: gold,
-                        side: const BorderSide(color: Color(0xFF587064)),
-                        padding: const EdgeInsets.all(16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 34,
-                            child: Text(
-                              gift.symbol,
-                              style: const TextStyle(fontSize: 26, color: gold),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  gift.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  gift.description,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    height: 1.4,
-                                    color: muted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          const Icon(Icons.add_rounded, size: 17),
-                        ],
-                      ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(27),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (altar)
+                  ...altarView()
+                else if (title) ...[
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: gold.withValues(alpha: .09),
+                      border: Border.all(color: gold.withValues(alpha: .25)),
+                    ),
+                    child: const Icon(
+                      Icons.flare_rounded,
+                      color: gold,
+                      size: 40,
                     ),
                   ),
-                if (run.rerolls > 0)
-                  secondary(
-                    'Relancer les dons  ·  ${run.rerolls}',
-                    () => setState(run.reroll),
-                    icon: Icons.casino_outlined,
+                  const SizedBox(height: 24),
+                  small('LES JARDINS DU CRÉPUSCULE', color: mint, spacing: 2.1),
+                  const SizedBox(height: 12),
+                  heading('Lanterne', size: 58),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Même la plus petite lumière\npeut réveiller un monde.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFFE0E7D9),
+                      height: 1.7,
+                      fontSize: 15,
+                    ),
                   ),
-              ] else if (run.phase == Phase.shop) ...[
-                ...shopView(),
-              ] else if (run.phase == Phase.paused) ...[
-                const Icon(Icons.nightlight_round, size: 40, color: gold),
-                const SizedBox(height: 20),
-                heading('Un instant\nde calme.', size: 38),
-                const SizedBox(height: 16),
-                const Text(
-                  'Ta lumière t’attend.',
-                  style: TextStyle(color: muted),
-                ),
-                const SizedBox(height: 30),
-                button(
-                  'Reprendre le voyage',
-                  togglePause,
-                  icon: Icons.play_arrow_rounded,
-                ),
-              ] else ...[
-                Icon(
-                  run.phase == Phase.won
-                      ? Icons.wb_sunny_outlined
-                      : Icons.nightlight_round,
-                  size: 48,
-                  color: gold,
-                ),
-                const SizedBox(height: 20),
-                small(
-                  run.phase == Phase.won
-                      ? 'LE JARDIN RESPIRE À NOUVEAU'
-                      : 'LA NUIT A GAGNÉ CETTE FOIS',
-                  color: mint,
-                  spacing: 1.5,
-                ),
-                const SizedBox(height: 14),
-                heading(
-                  run.phase == Phase.won
-                      ? 'La lumière\nest revenue.'
-                      : 'Une braise\nsuffit à renaître.',
-                  size: 36,
-                ),
-                const SizedBox(height: 10),
-                small(
-                  'Salle ${run.depth} sur $totalDepth  ·  +${run.embersEarned} braises',
-                  color: gold,
-                  spacing: 1,
-                ),
-                const SizedBox(height: 22),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    stat('${run.score}', 'ÉCLATS'),
-                    stat('${run.kills}', 'OMBRES'),
-                    stat('${run.elapsed.floor()} s', 'VOYAGE'),
-                  ],
-                ),
-                const SizedBox(height: 25),
-                button(
-                  'Rallumer la lanterne',
-                  start,
-                  icon: Icons.refresh_rounded,
-                ),
-                const SizedBox(height: 10),
-                secondary(
-                  'Autel des braises  ·  $embers',
-                  () => setState(() => altar = true),
-                  icon: Icons.local_fire_department_rounded,
-                ),
-                const SizedBox(height: 12),
-                small('Meilleure expédition : $best éclats'),
+                  const SizedBox(height: 34),
+                  button('Entrer dans le jardin', start),
+                  const SizedBox(height: 16),
+                  small(
+                    'Glisse pour esquiver. Arrête-toi pour attaquer.',
+                    color: const Color(0xFFC5D6CC),
+                  ),
+                  const SizedBox(height: 5),
+                  small(
+                    'Clavier : flèches / ZQSD  ·  Espace : esquive  ·  M : son',
+                  ),
+                  const SizedBox(height: 18),
+                  secondary(
+                    'Autel des braises  ·  $embers',
+                    () => setState(() => altar = true),
+                    icon: Icons.local_fire_department_rounded,
+                  ),
+                ] else if (run.phase == Phase.upgrade) ...[
+                  const Icon(Icons.auto_awesome, color: gold, size: 32),
+                  const SizedBox(height: 12),
+                  small(
+                    run.room == Reward.boss
+                        ? 'LE GARDIEN EST TOMBÉ'
+                        : run.room == Reward.shop
+                        ? 'MAÎTRE CRAPAUD'
+                        : 'SALLE ${run.depth} TRAVERSÉE',
+                    color: mint,
+                    spacing: 2,
+                  ),
+                  const SizedBox(height: 10),
+                  heading(
+                    run.room == Reward.boss
+                        ? 'Le bassin de lune\ns’ouvre à toi.'
+                        : 'Fais grandir\nta lumière.',
+                    size: 33,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    run.room == Reward.boss
+                        ? 'Tu reprends des forces. Choisis un don.'
+                        : 'Choisis un don pour la suite du voyage.',
+                    style: const TextStyle(color: muted, fontSize: 12),
+                  ),
+                  const SizedBox(height: 22),
+                  for (final gift in run.choices)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: OutlinedButton(
+                        onPressed: () {
+                          clearInput();
+                          setState(() => run.choose(gift));
+                          focus.requestFocus();
+                        },
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: const Color(0xFF223D40),
+                          foregroundColor: gold,
+                          side: const BorderSide(color: Color(0xFF587064)),
+                          padding: const EdgeInsets.all(16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(13),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 34,
+                              child: Text(
+                                gift.symbol,
+                                style: const TextStyle(
+                                  fontSize: 26,
+                                  color: gold,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    gift.name,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    gift.description,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      height: 1.4,
+                                      color: muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.add_rounded, size: 17),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (run.rerolls > 0)
+                    secondary(
+                      'Relancer les dons  ·  ${run.rerolls}',
+                      () => setState(run.reroll),
+                      icon: Icons.casino_outlined,
+                    ),
+                ] else if (run.phase == Phase.shop) ...[
+                  ...shopView(),
+                ] else if (run.phase == Phase.paused) ...[
+                  const Icon(Icons.nightlight_round, size: 40, color: gold),
+                  const SizedBox(height: 20),
+                  heading('Un instant\nde calme.', size: 38),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Ta lumière t’attend.',
+                    style: TextStyle(color: muted),
+                  ),
+                  const SizedBox(height: 30),
+                  button(
+                    'Reprendre le voyage',
+                    togglePause,
+                    icon: Icons.play_arrow_rounded,
+                  ),
+                ] else ...[
+                  Icon(
+                    run.phase == Phase.won
+                        ? Icons.wb_sunny_outlined
+                        : Icons.nightlight_round,
+                    size: 48,
+                    color: gold,
+                  ),
+                  const SizedBox(height: 20),
+                  small(
+                    run.phase == Phase.won
+                        ? 'LE JARDIN RESPIRE À NOUVEAU'
+                        : 'LA NUIT A GAGNÉ CETTE FOIS',
+                    color: mint,
+                    spacing: 1.5,
+                  ),
+                  const SizedBox(height: 14),
+                  heading(
+                    run.phase == Phase.won
+                        ? 'La lumière\nest revenue.'
+                        : 'Une braise\nsuffit à renaître.',
+                    size: 36,
+                  ),
+                  const SizedBox(height: 10),
+                  small(
+                    'Salle ${run.depth} sur $totalDepth  ·  +${run.embersEarned} braises',
+                    color: gold,
+                    spacing: 1,
+                  ),
+                  const SizedBox(height: 22),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      stat('${run.score}', 'ÉCLATS'),
+                      stat('${run.kills}', 'OMBRES'),
+                      stat('${run.elapsed.floor()} s', 'VOYAGE'),
+                    ],
+                  ),
+                  const SizedBox(height: 25),
+                  button(
+                    'Rallumer la lanterne',
+                    start,
+                    icon: Icons.refresh_rounded,
+                  ),
+                  const SizedBox(height: 10),
+                  secondary(
+                    'Autel des braises  ·  $embers',
+                    () => setState(() => altar = true),
+                    icon: Icons.local_fire_department_rounded,
+                  ),
+                  const SizedBox(height: 12),
+                  small('Meilleure expédition : $best éclats'),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
