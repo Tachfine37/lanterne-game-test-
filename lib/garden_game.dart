@@ -16,76 +16,62 @@ class GardenGame extends Game {
   final shaker = Random();
   double clock = 0, uiClock = 0;
   Offset? stickOrigin, stickEnd;
-  // The room lives in flat world coordinates (440 × 640); the view turns it
-  // 45° and halves its height, like Hades' fixed isometric camera.
-  static const viewW = 1100.0, viewH = 660.0, isoX = 650.0, isoY = 83.0;
-  static const sprite = 1.3, wallHeight = 84.0;
-  static Offset iso(Offset p) =>
-      Offset(p.dx - p.dy + isoX, (p.dx + p.dy) * .5 + isoY);
-  static Offset isoDirection(Offset v) =>
-      Offset(v.dx - v.dy, (v.dx + v.dy) * .5);
+  // The room lives in flat world coordinates (440 × 640). A camera placed
+  // behind and above the hero looks at it in perspective, like Archero: the
+  // floor recedes toward the north wall and walls stay vertical.
+  static const viewW = 480.0, viewH = 820.0;
+  static const _f = 1405.0, _cy = 1816.0, _h = 1891.0, _x0 = 240.0;
+  static const _y0 = -1406.0, backWall = 100.0, sideWall = 70.0;
 
-  /// Screen-space input (keys, thumb stick) to a world direction, so "up"
-  /// always walks up the screen.
-  static Offset fromScreen(Offset v) =>
-      Offset(.5 * v.dx + v.dy, -.5 * v.dx + v.dy);
+  /// A world point (and height above the floor) to the view.
+  static Offset project(Offset p, [double z = 0]) {
+    final depth = _cy - p.dy;
+    return Offset(_x0 + _f * (p.dx - 220) / depth, _y0 + _f * (_h - z) / depth);
+  }
+
+  /// How large things look at a given distance: 1 near the hero's spawn.
+  static double scaleAt(double y) => _f / (_cy - y) * .9;
+
+  /// The floor plane as a homography, so tiles, telegraphs and rings are
+  /// drawn in world units and foreshortened by the canvas itself.
   static final groundMatrix = Float64List.fromList([
-    1, .5, 0, 0, //
-    -1, .5, 0, 0, //
+    _f, 0, 0, 0, //
+    -_x0, -_y0, 0, -1, //
     0, 0, 1, 0, //
-    isoX, isoY, 0, 1,
+    _x0 * _cy - 220 * _f, _y0 * _cy + _f * _h, 0, _cy,
   ]);
   double get scale => min(size.x / viewW, size.y / viewH);
   Offset get inset =>
       Offset((size.x - viewW * scale) / 2, (size.y - viewH * scale) / 2);
 
-  /// Draws an upright sprite standing on a world position.
+  /// Draws an upright sprite standing on a world position, shrinking with
+  /// distance; [lift] raises it in the sprite's own units.
   void standing(
     Canvas c,
     Offset world,
     void Function() draw, {
     double lift = 0,
-    double size = sprite,
   }) {
-    final s = iso(world);
+    final s = project(world);
     c.save();
-    c.translate(s.dx, s.dy - lift);
-    c.scale(size);
+    c.translate(s.dx, s.dy);
+    c.scale(scaleAt(world.dy));
+    c.translate(0, -lift);
     draw();
     c.restore();
   }
 
-  /// Draws in the plane of the north wall, centred on world x.
+  /// Draws in the plane of the north wall, which faces the camera.
   void onWall(Canvas c, double x, double floor, void Function() draw) {
-    final base = iso(Offset(x, 57));
+    final base = project(Offset(x, 57));
     c.save();
-    c.transform(
-      Float64List.fromList([
-        1,
-        .5,
-        0,
-        0,
-        0,
-        1,
-        0,
-        0,
-        0,
-        0,
-        1,
-        0,
-        base.dx,
-        base.dy,
-        0,
-        1,
-      ]),
-    );
+    c.translate(base.dx, base.dy);
+    c.scale(_f / (_cy - 57));
     c.translate(-x, -floor);
     draw();
     c.restore();
   }
 
-  @override
-  Color backgroundColor() => const Color(0xFF122C30);
   @override
   void update(double dt) {
     clock += min(dt, .04);
@@ -180,14 +166,16 @@ class GardenGame extends Game {
     }
     for (final door in doors) {
       onWall(c, door.p.dx, 98, () => doorArch(c, door));
-      standing(c, Offset(door.p.dx, 57), () => doorSign(c, door), lift: 46);
+      standing(c, Offset(door.p.dx, 57), () => doorSign(c, door), lift: 50);
     }
-    for (var i = 0; i < 7; i++) {
-      standing(
-        c,
-        Offset(27, 110 + i * 78.0),
-        () => leaf(c, Offset.zero, i.toDouble(), .7 + (i % 3) * .15),
-      );
+    for (var i = 0; i < 6; i++) {
+      for (final x in const [30.0, 410.0]) {
+        standing(
+          c,
+          Offset(x, 120 + i * 90.0),
+          () => leaf(c, Offset.zero, i + x, .7 + (i % 3) * .15),
+        );
+      }
     }
     for (final coin in run.loot) {
       standing(c, coin.p, () {
@@ -210,7 +198,7 @@ class GardenGame extends Game {
         ),
       );
     }
-    double depth(Offset p) => p.dx + p.dy;
+    double depth(Offset p) => p.dy;
     final actors = <({double y, void Function() draw})>[
       (
         y: depth(run.player),
@@ -268,7 +256,7 @@ class GardenGame extends Game {
     }
     for (final b in run.bolts) {
       final color = b.hostile ? const Color(0xFFFF938C) : gold;
-      final tail = unit(isoDirection(b.v)) * (b.hostile ? 8 : 14);
+      final tail = unit(b.v) * (b.hostile ? 8 : 14);
       standing(c, b.p, () {
         line(
           c,
@@ -335,22 +323,17 @@ class GardenGame extends Game {
       );
     }
     frontRim(c, moon);
-    for (var i = 0; i < 6; i++) {
+    for (var i = 0; i < 7; i++) {
       standing(
         c,
-        Offset(60 + i * 68.0, 622),
-        () => leaf(c, Offset.zero, i.toDouble(), .8),
-      );
-      standing(
-        c,
-        Offset(436, 110 + i * 88.0),
-        () => leaf(c, Offset.zero, i + 3.0, .75),
+        Offset(20 + i * 67.0, 626),
+        () => leaf(c, Offset.zero, i.toDouble(), .9),
       );
     }
     if (run.phase == Phase.playing && run.grace > 0) {
       rect(
         c,
-        Rect.fromCenter(center: const Offset(550, 300), width: 430, height: 96),
+        Rect.fromCenter(center: const Offset(240, 360), width: 400, height: 92),
         const Color(0xE6153033),
         22,
       );
@@ -363,8 +346,8 @@ class GardenGame extends Game {
           Reward.fountain => 'LA SOURCE',
           _ => 'SALLE ${run.depth}${run.elite ? '  ·  ÉPREUVE' : ''}',
         },
-        const Offset(550, 284),
-        25,
+        const Offset(240, 345),
+        22,
         run.elite ? const Color(0xFFFF9F86) : gold,
       );
       label(
@@ -377,8 +360,8 @@ class GardenGame extends Game {
           _ when run.depth == roomsPerBiome + 1 => 'Le bassin de lune s’ouvre.',
           _ => 'Récompense : ${rewardNames[run.room]}',
         },
-        const Offset(550, 320),
-        16,
+        const Offset(240, 378),
+        14,
         mint,
       );
     }
@@ -503,14 +486,15 @@ class GardenGame extends Game {
     }
   }
 
-  /// An extruded stone wall between two floor points.
+  /// A stone wall standing on the floor between two points, [h] high.
   void wall(Canvas c, Offset a, Offset b, double h, Color color, Color cap) {
-    final pa = iso(a), pb = iso(b);
+    final pa = project(a), pb = project(b);
+    final ta = project(a, h), tb = project(b, h);
     final face = Path()
       ..moveTo(pa.dx, pa.dy)
       ..lineTo(pb.dx, pb.dy)
-      ..lineTo(pb.dx, pb.dy - h)
-      ..lineTo(pa.dx, pa.dy - h)
+      ..lineTo(tb.dx, tb.dy)
+      ..lineTo(ta.dx, ta.dy)
       ..close();
     c.drawPath(
       face,
@@ -521,62 +505,42 @@ class GardenGame extends Game {
           colors: [Color.lerp(color, const Color(0xFF000000), .45)!, color],
         ).createShader(face.getBounds()),
     );
-    final courses = max(1, (h / 20).round());
+    final courses = max(1, (h / 22).round());
     final steps = max(2, ((b - a).distance / 46).round());
+    Offset at(double t, double z) => project(Offset.lerp(a, b, t)!, z);
     for (var k = 0; k < courses; k++) {
-      final y0 = h * k / courses, y1 = h * (k + 1) / courses;
-      if (k > 0) {
-        line(
-          c,
-          pa - Offset(0, y0),
-          pb - Offset(0, y0),
-          const Color(0x26000000),
-          1.2,
-        );
-      }
+      final z0 = h * k / courses, z1 = h * (k + 1) / courses;
+      if (k > 0) line(c, at(0, z0), at(1, z0), const Color(0x26000000), 1.2);
       for (var i = 1; i < steps; i++) {
         final t = (i + (k.isOdd ? .5 : 0)) / steps;
         if (t >= 1) continue;
-        final q = Offset.lerp(pa, pb, t)!;
-        line(
-          c,
-          q - Offset(0, y0),
-          q - Offset(0, y1),
-          const Color(0x1C000000),
-          1,
-        );
+        line(c, at(t, z0), at(t, z1), const Color(0x1C000000), 1);
       }
     }
-    line(c, pa - Offset(0, h), pb - Offset(0, h), cap, 5);
-    line(
-      c,
-      pa - Offset(0, h - 3),
-      pb - Offset(0, h - 3),
-      const Color(0x33000000),
-      2,
-    );
+    line(c, ta, tb, cap, 5);
+    line(c, at(0, h - 3), at(1, h - 3), const Color(0x33000000), 2);
   }
 
   void backWalls(Canvas c, bool moon) {
     final lit = moon ? const Color(0xFF465580) : const Color(0xFF3F5E55);
     final shade = moon ? const Color(0xFF323D63) : const Color(0xFF2E4842);
     final cap = moon ? const Color(0xFF7686B5) : const Color(0xFF6C8C7C);
+    wall(c, const Offset(20, 57), const Offset(420, 57), backWall, lit, cap);
+    wall(c, const Offset(20, 607), const Offset(20, 57), sideWall, shade, cap);
     wall(
       c,
-      const Offset(20, 607),
-      const Offset(20, 57),
-      wallHeight,
+      const Offset(420, 57),
+      const Offset(420, 607),
+      sideWall,
       shade,
       cap,
     );
-    wall(c, const Offset(20, 57), const Offset(420, 57), wallHeight, lit, cap);
   }
 
   void frontRim(Canvas c, bool moon) {
     final color = moon ? const Color(0xFF28324F) : const Color(0xFF223B36);
     final cap = moon ? const Color(0xFF55648F) : const Color(0xFF4F6D60);
-    wall(c, const Offset(20, 607), const Offset(420, 607), 16, color, cap);
-    wall(c, const Offset(420, 607), const Offset(420, 57), 16, color, cap);
+    wall(c, const Offset(20, 607), const Offset(420, 607), 14, color, cap);
   }
 
   void garden(Canvas c) {
@@ -871,14 +835,14 @@ class GardenGame extends Game {
     final bob = sin(clock * 2.5 + door.p.dx) * 1.5;
     c.drawCircle(
       Offset(0, bob),
-      15,
+      21,
       Paint()
         ..color = tint.withValues(alpha: .85)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.2,
+        ..strokeWidth = 2.8,
     );
-    rewardIcon(c, Offset(0, bob), door.reward, 8);
-    if (door.elite) rewardIcon(c, const Offset(17, -17), Reward.boss, 4.5);
+    rewardIcon(c, Offset(0, bob), door.reward, 11.5);
+    if (door.elite) rewardIcon(c, const Offset(23, -23), Reward.boss, 6);
   }
 
   void pedestal(Canvas c, Pickup reward) {

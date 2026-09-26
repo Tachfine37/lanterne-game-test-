@@ -197,29 +197,25 @@ class _GardenScreenState extends State<GardenScreen>
     }
     if (run.phase == Phase.playing && pointer == null) {
       bool has(List<LogicalKeyboardKey> values) => values.any(keys.contains);
-      run.movement = GardenGame.fromScreen(
-        Offset(
-          (has([LogicalKeyboardKey.arrowRight, LogicalKeyboardKey.keyD])
-                  ? 1
-                  : 0) -
-              (has([
-                    LogicalKeyboardKey.arrowLeft,
-                    LogicalKeyboardKey.keyA,
-                    LogicalKeyboardKey.keyQ,
-                  ])
-                  ? 1
-                  : 0),
-          (has([LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.keyS])
-                  ? 1
-                  : 0) -
-              (has([
-                    LogicalKeyboardKey.arrowUp,
-                    LogicalKeyboardKey.keyW,
-                    LogicalKeyboardKey.keyZ,
-                  ])
-                  ? 1
-                  : 0),
-        ),
+      run.movement = Offset(
+        (has([LogicalKeyboardKey.arrowRight, LogicalKeyboardKey.keyD])
+                ? 1
+                : 0) -
+            (has([
+                  LogicalKeyboardKey.arrowLeft,
+                  LogicalKeyboardKey.keyA,
+                  LogicalKeyboardKey.keyQ,
+                ])
+                ? 1
+                : 0),
+        (has([LogicalKeyboardKey.arrowDown, LogicalKeyboardKey.keyS]) ? 1 : 0) -
+            (has([
+                  LogicalKeyboardKey.arrowUp,
+                  LogicalKeyboardKey.keyW,
+                  LogicalKeyboardKey.keyZ,
+                ])
+                ? 1
+                : 0),
       );
     }
     return KeyEventResult.handled;
@@ -246,74 +242,64 @@ class _GardenScreenState extends State<GardenScreen>
           ),
         ),
         child: SafeArea(
-          child: Stack(
-            children: [
-              LayoutBuilder(
-                builder: (context, box) {
-                  final wide = box.maxWidth >= 1300;
-                  return Column(
-                    children: [
-                      if (wide) header(),
-                      Expanded(
-                        child: wide
-                            ? Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(width: 244, child: leftPanel()),
-                                  const SizedBox(width: 40),
-                                  Flexible(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        vertical: 18,
-                                      ),
-                                      child: gamePanel(),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 40),
-                                  SizedBox(width: 222, child: rightPanel()),
-                                ],
-                              )
-                            : Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                child: gamePanel(),
-                              ),
-                      ),
-                      if (wide)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final wide = box.maxWidth >= 980;
+              return Column(
+                children: [
+                  if (wide) header(),
+                  Expanded(
+                    child: wide
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              small(
-                                'UN PETIT MONDE. UNE GRANDE LUMIÈRE.',
-                                spacing: 2,
+                              SizedBox(width: 244, child: leftPanel()),
+                              const SizedBox(width: 40),
+                              Flexible(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 18,
+                                  ),
+                                  child: gamePanel(),
+                                ),
                               ),
-                              small(
-                                'PROTOTYPE 01  ·  FLUTTER + FLAME',
-                                spacing: 1.5,
-                              ),
+                              const SizedBox(width: 40),
+                              SizedBox(width: 222, child: rightPanel()),
                             ],
+                          )
+                        : Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child: gamePanel(),
                           ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-              // A portrait phone is too narrow for menus inside the landscape
-              // room, so they take the whole screen there.
-              if (run.phase != Phase.playing && portrait)
-                Positioned.fill(child: overlay()),
-            ],
+                  ),
+                  if (wide)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(32, 0, 32, 18),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          small(
+                            'UN PETIT MONDE. UNE GRANDE LUMIÈRE.',
+                            spacing: 2,
+                          ),
+                          small(
+                            'PROTOTYPE 01  ·  FLUTTER + FLAME',
+                            spacing: 1.5,
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
     ),
   );
-
-  bool get portrait => MediaQuery.sizeOf(context).aspectRatio < .9;
 
   Widget small(String s, {Color color = muted, double spacing = 0}) => Text(
     s,
@@ -564,7 +550,7 @@ class _GardenScreenState extends State<GardenScreen>
 
   Widget gamePanel() => Center(
     child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 1000),
+      constraints: const BoxConstraints(maxWidth: 480),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -697,7 +683,7 @@ class _GardenScreenState extends State<GardenScreen>
                         final delta = e.localPosition - game.stickOrigin!;
                         run.movement = delta.distance < 7
                             ? Offset.zero
-                            : GardenGame.fromScreen(unit(delta));
+                            : unit(delta);
                       },
                       onPointerUp: (e) {
                         if (e.pointer == pointer) clearInput();
@@ -801,7 +787,7 @@ class _GardenScreenState extends State<GardenScreen>
                           ),
                         ),
                       ),
-                    if (run.phase != Phase.playing && !portrait) overlay(),
+                    if (run.phase != Phase.playing) overlay(),
                   ],
                 ),
               ),
@@ -810,9 +796,7 @@ class _GardenScreenState extends State<GardenScreen>
           Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 2),
             child: small(
-              MediaQuery.sizeOf(context).aspectRatio < 1
-                  ? '↻  TOURNE TON TÉLÉPHONE POUR JOUER EN GRAND'
-                  : run.phase == Phase.playing
+              run.phase == Phase.playing
                   ? '${run.moving ? 'EN MOUVEMENT' : 'TIR AUTOMATIQUE'}   ·   ${run.acquired.length} DONS   ·   ${run.coins} LUCIOLES'
                   : 'UNE EXPÉDITION À LA LUEUR DES LANTERNES',
               spacing: 1.2,
@@ -857,7 +841,7 @@ class _GardenScreenState extends State<GardenScreen>
   Widget overlay() {
     final title = run.phase == Phase.title;
     return Container(
-      color: ink.withValues(alpha: portrait ? .96 : (title ? .48 : .86)),
+      color: ink.withValues(alpha: title ? .48 : .86),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
