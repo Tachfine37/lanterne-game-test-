@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:web/web.dart' as web;
@@ -7,11 +9,40 @@ import 'model.dart';
 
 /// Every sound is built from oscillators and a noise buffer: no assets.
 class Sound {
+  /// Safari only starts audio inside a native click/touch/key handler, and a
+  /// Flutter tap callback is not guaranteed to run there, so the raw DOM
+  /// gesture events unlock audio too.
+  Sound() {
+    final listener = ((web.Event _) => unlock()).toJS;
+    for (final type in const [
+      'pointerdown',
+      'pointerup',
+      'touchend',
+      'mousedown',
+      'click',
+      'keydown',
+    ]) {
+      web.window.addEventListener(
+        type,
+        listener,
+        web.AddEventListenerOptions(capture: true, passive: true),
+      );
+    }
+    web.document.addEventListener(
+      'visibilitychange',
+      ((web.Event _) {
+        if (web.document.visibilityState == 'visible') _resume();
+      }).toJS,
+    );
+  }
+
+  static const _level = 3.2;
   web.AudioContext? _context;
   web.GainNode? _master, _musicBus;
   web.AudioBuffer? _noise;
+  web.HTMLAudioElement? _silence;
   Timer? _music;
-  bool _muted = false;
+  bool _muted = false, _primed = false;
   int _beat = 0, _biome = 0;
   final _lastPlayed = <Sfx, int>{};
   final _random = Random();
@@ -20,17 +51,28 @@ class Sound {
   bool get muted => _muted;
   set muted(bool value) {
     _muted = value;
-    _master?.gain.value = value ? 0 : .8;
+    _master?.gain.value = value ? 0 : _level;
   }
 
-  /// Created lazily from a user gesture so browsers allow playback.
+  bool get _running => _context?.state == 'running';
+
   web.AudioContext? get _audio {
     try {
-      final context = _context ??= web.AudioContext();
-      if (_master == null) {
-        _master = context.createGain()..gain.value = _muted ? 0 : .8;
-        _master!.connect(context.destination);
-        _musicBus = context.createGain()..gain.value = .55;
+      if (_context == null) {
+        _mediaSession();
+        final context = _context = web.AudioContext();
+        // Loud enough for laptop and phone speakers; the compressor keeps
+        // overlapping cues from clipping.
+        final limiter = context.createDynamicsCompressor();
+        limiter.threshold.value = -10;
+        limiter.knee.value = 6;
+        limiter.ratio.value = 6;
+        limiter.attack.value = .003;
+        limiter.release.value = .2;
+        limiter.connect(context.destination);
+        _master = context.createGain()..gain.value = _muted ? 0 : _level;
+        _master!.connect(limiter);
+        _musicBus = context.createGain()..gain.value = .9;
         _musicBus!.connect(_master!);
         final length = context.sampleRate.round();
         _noise = context.createBuffer(1, length, context.sampleRate);
@@ -40,12 +82,57 @@ class Sound {
         }
         _noise!.copyToChannel(data.toJS, 0);
       }
-      if (context.state == 'suspended') context.resume();
-      return context;
+      return _context;
     } catch (_) {
       return null;
     }
   }
+
+  void _resume() {
+    final context = _context;
+    if (context == null || context.state == 'running') return;
+    unawaited(context.resume().toDart.then((_) {}, onError: (_) {}));
+  }
+
+  /// iPhones mute Web Audio with the silent switch unless the page declares
+  /// itself a media player.
+  void _mediaSession() {
+    final navigator = web.window.navigator as JSObject;
+    if (navigator.has('audioSession')) {
+      (navigator['audioSession'] as JSObject)['type'] = 'playback'.toJS;
+      return;
+    }
+    final ios =
+        RegExp('iPhone|iPad|iPod').hasMatch(web.window.navigator.userAgent) ||
+        (web.window.navigator.userAgent.contains('Macintosh') &&
+            web.window.navigator.maxTouchPoints > 1);
+    if (!ios) return;
+    // Older iOS: a looping silent <audio> element has the same effect.
+    final wav = BytesBuilder()
+      ..add(ascii.encode('RIFF'))
+      ..add(_le(36 + 800, 4))
+      ..add(ascii.encode('WAVEfmt '))
+      ..add(_le(16, 4))
+      ..add(_le(1, 2))
+      ..add(_le(1, 2))
+      ..add(_le(8000, 4))
+      ..add(_le(8000, 4))
+      ..add(_le(1, 2))
+      ..add(_le(8, 2))
+      ..add(ascii.encode('data'))
+      ..add(_le(800, 4))
+      ..add(List.filled(800, 128));
+    final audio = web.HTMLAudioElement()
+      ..src = 'data:audio/wav;base64,${base64Encode(wav.toBytes())}'
+      ..loop = true;
+    audio.setAttribute('playsinline', '');
+    unawaited(audio.play().toDart.then((_) {}, onError: (_) {}));
+    _silence = audio;
+  }
+
+  static List<int> _le(int value, int bytes) => [
+    for (var i = 0; i < bytes; i++) (value >> (8 * i)) & 0xFF,
+  ];
 
   void _tone(
     double from,
@@ -57,7 +144,7 @@ class Sound {
     web.AudioNode? bus,
   }) {
     final context = _audio;
-    if (context == null) return;
+    if (context == null || !_running) return;
     final start = context.currentTime + delay;
     final oscillator = context.createOscillator()..type = wave;
     oscillator.frequency
@@ -76,7 +163,7 @@ class Sound {
 
   void _hiss(double duration, double cutoff, {double volume = .08}) {
     final context = _audio;
-    if (context == null) return;
+    if (context == null || !_running) return;
     final start = context.currentTime;
     final source = context.createBufferSource()..buffer = _noise;
     final filter = context.createBiquadFilter()..type = 'lowpass';
@@ -94,8 +181,24 @@ class Sound {
     source.stop(start + duration + .05);
   }
 
-  /// Call from a tap handler: iOS Safari only starts audio inside a gesture.
-  void unlock() => _audio;
+  /// Must run inside a user gesture: creates, resumes and primes the context.
+  void unlock() {
+    final context = _audio;
+    if (context == null) return;
+    if (context.state != 'running') {
+      unawaited(context.resume().toDart.then((_) {}, onError: (_) {}));
+    }
+    if (_silence != null && _silence!.paused) {
+      unawaited(_silence!.play().toDart.then((_) {}, onError: (_) {}));
+    }
+    if (_primed) return;
+    _primed = true;
+    // Older iOS only unlocks once a buffer is started inside the gesture.
+    final source = context.createBufferSource()
+      ..buffer = context.createBuffer(1, 1, context.sampleRate);
+    source.connect(context.destination);
+    source.start(0);
+  }
 
   void play(Sfx sfx) {
     if (_muted) return;
@@ -168,7 +271,7 @@ class Sound {
     }
     if (_music != null) return;
     _music = Timer.periodic(const Duration(milliseconds: 420), (_) {
-      if (_muted || _context == null) return;
+      if (_muted || !_running) return;
       final root = _biome == 0 ? 293.66 : 246.94;
       const scale = [0, 3, 5, 7, 10, 12, 15];
       _beat++;
