@@ -22,7 +22,7 @@ flutter test
 flutter build web --release --base-href /lanterne-game-test-/
 ```
 
-Le workflow `.github/workflows/pages.yml` vérifie et publie `main`. La première fois, dans GitHub : **Settings → Pages → Source → GitHub Actions**. Ensuite chaque push sur `main` reconstruit le jeu.
+Le workflow `.github/workflows/pages.yml` vérifie et publie `main`. GitHub Pages est configuré avec la source **GitHub Actions**. Chaque push sur `main` reconstruit le jeu.
 
 ## Organisation
 
