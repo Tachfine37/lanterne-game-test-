@@ -3,6 +3,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'audio.dart';
 import 'garden_game.dart';
 import 'model.dart';
 
@@ -44,18 +45,19 @@ class GardenScreen extends StatefulWidget {
 class _GardenScreenState extends State<GardenScreen>
     with WidgetsBindingObserver {
   final run = RunModel();
+  final sound = Sound();
   late final GardenGame game;
   final focus = FocusNode();
   final Set<LogicalKeyboardKey> keys = {};
   int? pointer;
-  int best = 0;
-  bool recorded = false;
+  int best = 0, embers = 0;
+  bool recorded = false, altar = false;
   SharedPreferences? prefs;
 
   @override
   void initState() {
     super.initState();
-    game = GardenGame(run, tick);
+    game = GardenGame(run, tick, sound);
     WidgetsBinding.instance.addObserver(this);
     loadRecord();
   }
@@ -63,7 +65,16 @@ class _GardenScreenState extends State<GardenScreen>
   Future<void> loadRecord() async {
     try {
       prefs = await SharedPreferences.getInstance();
-      if (mounted) setState(() => best = prefs!.getInt('lanterne.best') ?? 0);
+      final p = prefs!;
+      if (!mounted) return;
+      setState(() {
+        best = p.getInt('lanterne.best') ?? 0;
+        embers = p.getInt('lanterne.embers') ?? 0;
+        sound.muted = p.getBool('lanterne.muted') ?? false;
+        for (final perk in perks) {
+          run.perkLevels[perk.id] = p.getInt('lanterne.perk.${perk.id}') ?? 0;
+        }
+      });
     } catch (_) {
       /* Private browsing may disable storage. */
     }
@@ -73,11 +84,17 @@ class _GardenScreenState extends State<GardenScreen>
     if (!mounted) return;
     if (run.finished && !recorded) {
       recorded = true;
+      embers += run.embersEarned;
+      prefs?.setInt('lanterne.embers', embers);
       if (run.score > best) {
         best = run.score;
         prefs?.setInt('lanterne.best', best);
       }
     }
+    sound.music(
+      on: run.phase != Phase.title && !run.finished,
+      biome: run.biome,
+    );
     setState(() {});
   }
 
@@ -90,10 +107,32 @@ class _GardenScreenState extends State<GardenScreen>
   }
 
   void start() {
+    sound.unlock();
     clearInput();
     recorded = false;
+    altar = false;
     setState(run.start);
     focus.requestFocus();
+  }
+
+  void toggleMute() {
+    setState(() => sound.muted = !sound.muted);
+    prefs?.setBool('lanterne.muted', sound.muted);
+    if (!sound.muted) sound.unlock();
+    focus.requestFocus();
+  }
+
+  void buyPerk(Perk perk) {
+    final level = run.perk(perk.id);
+    if (level >= perk.maxLevel || embers < perk.cost(level)) return;
+    setState(() {
+      embers -= perk.cost(level);
+      run.perkLevels[perk.id] = level + 1;
+    });
+    prefs?.setInt('lanterne.embers', embers);
+    prefs?.setInt('lanterne.perk.${perk.id}', level + 1);
+    sound.unlock();
+    sound.play(Sfx.gift);
   }
 
   void togglePause() {
@@ -114,6 +153,7 @@ class _GardenScreenState extends State<GardenScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     focus.dispose();
+    sound.dispose();
     super.dispose();
   }
 
@@ -136,6 +176,10 @@ class _GardenScreenState extends State<GardenScreen>
       if (run.phase == Phase.playing || run.phase == Phase.paused) {
         togglePause();
       }
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.keyM) {
+      toggleMute();
       return KeyEventResult.handled;
     }
     if (!movementKeys.contains(event.logicalKey)) return KeyEventResult.ignored;
@@ -295,9 +339,9 @@ class _GardenScreenState extends State<GardenScreen>
           ),
           child: Row(
             children: [
-              const Icon(Icons.circle, size: 6, color: mint),
+              const Icon(Icons.local_fire_department, size: 12, color: gold),
               const SizedBox(width: 7),
-              small('DÉMO JOUABLE', color: mint, spacing: 1),
+              small('$embers BRAISES', color: gold, spacing: 1),
             ],
           ),
         ),
@@ -352,7 +396,7 @@ class _GardenScreenState extends State<GardenScreen>
             'Choisis un don après chaque\nvague. Fais grandir ta lumière.',
           ),
           const SizedBox(height: 25),
-          small('P / ÉCHAP  ·  METTRE EN PAUSE', spacing: 1),
+          small('P / ÉCHAP  ·  PAUSE     M  ·  SON', spacing: 1),
         ],
       ),
     ),
@@ -406,19 +450,28 @@ class _GardenScreenState extends State<GardenScreen>
             children: [
               const Icon(Icons.nightlight_round, color: gold, size: 24),
               const SizedBox(height: 15),
-              heading('Le jardin\ndes murmures', size: 23),
+              heading(
+                run.biome == 0
+                    ? 'Le jardin\ndes murmures'
+                    : 'Le bassin\nde lune',
+                size: 23,
+              ),
               const SizedBox(height: 14),
-              small('5 VAGUES  ·  1 GARDIEN ANCIEN', spacing: .8),
+              small('10 VAGUES  ·  2 GARDIENS', spacing: .8),
               const SizedBox(height: 22),
               Row(
                 children: List.generate(
-                  5,
+                  totalWaves,
                   (i) => Expanded(
                     child: Container(
                       height: 4,
-                      margin: const EdgeInsets.only(right: 4),
+                      margin: const EdgeInsets.only(right: 3),
                       decoration: BoxDecoration(
-                        color: i < run.wave ? gold : Colors.white10,
+                        color: i < run.wave
+                            ? (isBossWave(i + 1)
+                                  ? const Color(0xFFD59DAB)
+                                  : gold)
+                            : Colors.white10,
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ),
@@ -426,7 +479,9 @@ class _GardenScreenState extends State<GardenScreen>
                 ),
               ),
               const SizedBox(height: 9),
-              small('Vague ${run.wave} sur 5', color: gold),
+              small('Vague ${run.wave} sur $totalWaves', color: gold),
+              const SizedBox(height: 3),
+              small(biomeNames[run.biome], spacing: 1),
             ],
           ),
         ),
@@ -465,6 +520,11 @@ class _GardenScreenState extends State<GardenScreen>
         const SizedBox(height: 7),
         heading('$best', size: 30),
         small('éclats de lumière'),
+        const SizedBox(height: 22),
+        small('BRAISES', spacing: 1.5),
+        const SizedBox(height: 7),
+        heading('$embers', size: 24),
+        small('à offrir à l’autel'),
       ],
     ),
   );
@@ -509,8 +569,8 @@ class _GardenScreenState extends State<GardenScreen>
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          small('${run.hp.ceil()} / ${run.maxHp.ceil()}'),
+                          const SizedBox(width: 6),
+                          small('${run.hp.ceil()}', color: gold),
                         ],
                       ),
                       const SizedBox(height: 5),
@@ -526,18 +586,40 @@ class _GardenScreenState extends State<GardenScreen>
                     ],
                   ),
                 ),
-                const SizedBox(width: 20),
+                const SizedBox(width: 12),
                 Column(
                   children: [
                     small('VAGUE', spacing: 1),
                     Text(
-                      '${run.wave} / 5',
+                      '${run.wave} / $totalWaves',
                       style: const TextStyle(fontSize: 15, color: gold),
                     ),
                   ],
                 ),
                 const SizedBox(width: 5),
                 IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 34,
+                    height: 40,
+                  ),
+                  tooltip: sound.muted ? 'Activer le son' : 'Couper le son',
+                  onPressed: toggleMute,
+                  icon: Icon(
+                    sound.muted
+                        ? Icons.volume_off_rounded
+                        : Icons.volume_up_rounded,
+                    size: 20,
+                  ),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 34,
+                    height: 40,
+                  ),
                   tooltip: run.phase == Phase.paused ? 'Reprendre' : 'Pause',
                   onPressed:
                       run.phase == Phase.playing || run.phase == Phase.paused
@@ -605,9 +687,11 @@ class _GardenScreenState extends State<GardenScreen>
                                 child: FittedBox(
                                   fit: BoxFit.scaleDown,
                                   child: small(
-                                    run.wave == 5
-                                        ? 'LE GARDIEN ANCIEN'
-                                        : 'JARDIN DES MURMURES',
+                                    switch (run.boss?.kind) {
+                                      Kind.tortoise => 'LE GARDIEN ANCIEN',
+                                      Kind.owl => 'LE COMBAT FINAL',
+                                      _ => biomeNames[run.biome],
+                                    },
                                     color: const Color(0xFFD1DDD1),
                                     spacing: 1.5,
                                   ),
@@ -619,9 +703,7 @@ class _GardenScreenState extends State<GardenScreen>
                           ),
                         ),
                       ),
-                    if (run.phase == Phase.playing &&
-                        run.wave == 5 &&
-                        run.enemies.isNotEmpty)
+                    if (run.phase == Phase.playing && run.boss != null)
                       Positioned(
                         top: 36,
                         left: 50,
@@ -631,11 +713,7 @@ class _GardenScreenState extends State<GardenScreen>
                             ClipRRect(
                               borderRadius: BorderRadius.circular(4),
                               child: LinearProgressIndicator(
-                                value: max(
-                                  0,
-                                  run.enemies.first.hp /
-                                      run.enemies.first.maxHp,
-                                ),
+                                value: max(0, run.boss!.hp / run.boss!.maxHp),
                                 minHeight: 6,
                                 color: const Color(0xFFD59DAB),
                                 backgroundColor: ink,
@@ -643,7 +721,9 @@ class _GardenScreenState extends State<GardenScreen>
                             ),
                             const SizedBox(height: 4),
                             small(
-                              'LA TORTUE-SANCTUAIRE',
+                              run.boss!.kind == Kind.owl
+                                  ? 'LA CHOUETTE DE MINUIT'
+                                  : 'LA TORTUE-SANCTUAIRE',
                               color: const Color(0xFFE5C1CB),
                               spacing: 1,
                             ),
@@ -735,7 +815,9 @@ class _GardenScreenState extends State<GardenScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (title) ...[
+              if (altar)
+                ...altarView()
+              else if (title) ...[
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
@@ -767,17 +849,36 @@ class _GardenScreenState extends State<GardenScreen>
                   color: const Color(0xFFC5D6CC),
                 ),
                 const SizedBox(height: 5),
-                small('Clavier : flèches / ZQSD / WASD'),
+                small('Clavier : flèches / ZQSD / WASD  ·  M : son'),
+                const SizedBox(height: 18),
+                secondary(
+                  'Autel des braises  ·  $embers',
+                  () => setState(() => altar = true),
+                  icon: Icons.local_fire_department_rounded,
+                ),
               ] else if (run.phase == Phase.upgrade) ...[
                 const Icon(Icons.auto_awesome, color: gold, size: 32),
                 const SizedBox(height: 12),
-                small('VAGUE ${run.wave} TRAVERSÉE', color: mint, spacing: 2),
+                small(
+                  run.wave == 5
+                      ? 'LE GARDIEN EST TOMBÉ'
+                      : 'VAGUE ${run.wave} TRAVERSÉE',
+                  color: mint,
+                  spacing: 2,
+                ),
                 const SizedBox(height: 10),
-                heading('Fais grandir\nta lumière.', size: 33),
+                heading(
+                  run.wave == 5
+                      ? 'Le bassin de lune\ns’ouvre à toi.'
+                      : 'Fais grandir\nta lumière.',
+                  size: 33,
+                ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Choisis un don pour la suite du voyage.',
-                  style: TextStyle(color: muted, fontSize: 12),
+                Text(
+                  run.wave == 5
+                      ? 'Tu reprends des forces. Choisis un don.'
+                      : 'Choisis un don pour la suite du voyage.',
+                  style: const TextStyle(color: muted, fontSize: 12),
                 ),
                 const SizedBox(height: 22),
                 for (final gift in run.choices)
@@ -837,6 +938,12 @@ class _GardenScreenState extends State<GardenScreen>
                       ),
                     ),
                   ),
+                if (run.rerolls > 0)
+                  secondary(
+                    'Relancer les dons  ·  ${run.rerolls}',
+                    () => setState(run.reroll),
+                    icon: Icons.casino_outlined,
+                  ),
               ] else if (run.phase == Phase.paused) ...[
                 const Icon(Icons.nightlight_round, size: 40, color: gold),
                 const SizedBox(height: 20),
@@ -875,7 +982,13 @@ class _GardenScreenState extends State<GardenScreen>
                       : 'Une braise\nsuffit à renaître.',
                   size: 36,
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 10),
+                small(
+                  'Vague ${run.wave} sur $totalWaves  ·  +${run.embersEarned} braises',
+                  color: gold,
+                  spacing: 1,
+                ),
+                const SizedBox(height: 22),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -890,12 +1003,123 @@ class _GardenScreenState extends State<GardenScreen>
                   start,
                   icon: Icons.refresh_rounded,
                 ),
+                const SizedBox(height: 10),
+                secondary(
+                  'Autel des braises  ·  $embers',
+                  () => setState(() => altar = true),
+                  icon: Icons.local_fire_department_rounded,
+                ),
                 const SizedBox(height: 12),
                 small('Meilleure expédition : $best éclats'),
               ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget secondary(String text, VoidCallback onPressed, {IconData? icon}) =>
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon ?? Icons.arrow_back_rounded, size: 17),
+          label: Text(text, textAlign: TextAlign.center),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: gold,
+            side: BorderSide(color: gold.withValues(alpha: .35)),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      );
+
+  /// Permanent upgrades bought with embers earned at the end of each run.
+  List<Widget> altarView() => [
+    const Icon(Icons.local_fire_department_rounded, color: gold, size: 36),
+    const SizedBox(height: 12),
+    small('L’AUTEL DES BRAISES', color: mint, spacing: 2),
+    const SizedBox(height: 10),
+    heading('$embers braises', size: 32),
+    const SizedBox(height: 8),
+    const Text(
+      'Chaque expédition rapporte des braises.\nOffre-les pour renforcer ta lanterne.',
+      textAlign: TextAlign.center,
+      style: TextStyle(color: muted, fontSize: 12, height: 1.5),
+    ),
+    const SizedBox(height: 20),
+    for (final perk in perks) perkRow(perk),
+    const SizedBox(height: 8),
+    secondary(
+      run.phase == Phase.title ? 'Retour' : 'Retour au bilan',
+      () => setState(() => altar = false),
+    ),
+  ];
+
+  Widget perkRow(Perk perk) {
+    final level = run.perk(perk.id);
+    final maxed = level >= perk.maxLevel;
+    final cost = perk.cost(level);
+    final affordable = !maxed && embers >= cost;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF223D40),
+        border: Border.all(color: const Color(0xFF587064)),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  perk.name,
+                  style: const TextStyle(
+                    color: gold,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  perk.description,
+                  style: const TextStyle(color: muted, fontSize: 12),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    for (var i = 0; i < perk.maxLevel; i++)
+                      Container(
+                        width: 14,
+                        height: 4,
+                        margin: const EdgeInsets.only(right: 3),
+                        decoration: BoxDecoration(
+                          color: i < level ? gold : Colors.white10,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton(
+            onPressed: affordable ? () => buyPerk(perk) : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: gold,
+              foregroundColor: ink,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            child: Text(maxed ? 'Max' : '$cost ✦'),
+          ),
+        ],
       ),
     );
   }
