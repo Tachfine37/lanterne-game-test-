@@ -305,45 +305,56 @@ class _GardenScreenState extends State<GardenScreen>
     ),
   );
 
-  Widget leftPanel() => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 20),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        small('CHAPITRE I', color: mint, spacing: 3),
-        const SizedBox(height: 18),
-        heading('Une lueur\ndans la nuit.', size: 39),
-        const SizedBox(height: 20),
-        const Text(
-          'Le jardin s’est endormi.\nSes ombres, elles, sont éveillées.\nRallume ce qui reste de lumière.',
-          style: TextStyle(color: muted, fontSize: 14, height: 1.8),
-        ),
-        const SizedBox(height: 30),
-        Container(height: 1, color: Colors.white10),
-        const SizedBox(height: 26),
-        small('LE CARNET DU GARDIEN', spacing: 2),
-        const SizedBox(height: 18),
-        tip(
-          Icons.open_with_rounded,
-          'Déplace-toi',
-          'Flèches, ZQSD ou WASD.\nSur mobile, glisse le doigt.',
-        ),
-        const SizedBox(height: 18),
-        tip(
-          Icons.auto_awesome,
-          'Arrête-toi pour tirer',
-          'Ta lanterne vise toute seule.\nTrouve le bon moment.',
-        ),
-        const SizedBox(height: 18),
-        tip(
-          Icons.spa_outlined,
-          'Compose tes pouvoirs',
-          'Choisis un don après chaque\nvague. Fais grandir ta lumière.',
-        ),
-        const SizedBox(height: 25),
-        small('P / ÉCHAP  ·  METTRE EN PAUSE', spacing: 1),
-      ],
+  Widget sidePanel(Widget child) => LayoutBuilder(
+    builder: (context, box) => SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: box.maxHeight),
+        child: Center(child: child),
+      ),
+    ),
+  );
+
+  Widget leftPanel() => sidePanel(
+    Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          small('CHAPITRE I', color: mint, spacing: 3),
+          const SizedBox(height: 18),
+          heading('Une lueur\ndans la nuit.', size: 39),
+          const SizedBox(height: 20),
+          const Text(
+            'Le jardin s’est endormi.\nSes ombres, elles, sont éveillées.\nRallume ce qui reste de lumière.',
+            style: TextStyle(color: muted, fontSize: 14, height: 1.8),
+          ),
+          const SizedBox(height: 30),
+          Container(height: 1, color: Colors.white10),
+          const SizedBox(height: 26),
+          small('LE CARNET DU GARDIEN', spacing: 2),
+          const SizedBox(height: 18),
+          tip(
+            Icons.open_with_rounded,
+            'Déplace-toi',
+            'Flèches, ZQSD ou WASD.\nSur mobile, glisse le doigt.',
+          ),
+          const SizedBox(height: 18),
+          tip(
+            Icons.auto_awesome,
+            'Arrête-toi pour tirer',
+            'Ta lanterne vise toute seule.\nTrouve le bon moment.',
+          ),
+          const SizedBox(height: 18),
+          tip(
+            Icons.spa_outlined,
+            'Compose tes pouvoirs',
+            'Choisis un don après chaque\nvague. Fais grandir ta lumière.',
+          ),
+          const SizedBox(height: 25),
+          small('P / ÉCHAP  ·  METTRE EN PAUSE', spacing: 1),
+        ],
+      ),
     ),
   );
   Widget tip(IconData icon, String title, String text) => Row(
@@ -376,84 +387,86 @@ class _GardenScreenState extends State<GardenScreen>
       ),
     ],
   );
-  Widget rightPanel() => Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      small('TON EXPÉDITION', spacing: 2),
-      const SizedBox(height: 20),
-      Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0x661B343A),
-          border: Border.all(color: Colors.white10),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.nightlight_round, color: gold, size: 24),
-            const SizedBox(height: 15),
-            heading('Le jardin\ndes murmures', size: 23),
-            const SizedBox(height: 14),
-            small('5 VAGUES  ·  1 GARDIEN ANCIEN', spacing: .8),
-            const SizedBox(height: 22),
-            Row(
-              children: List.generate(
-                5,
-                (i) => Expanded(
-                  child: Container(
-                    height: 4,
-                    margin: const EdgeInsets.only(right: 4),
-                    decoration: BoxDecoration(
-                      color: i < run.wave ? gold : Colors.white10,
-                      borderRadius: BorderRadius.circular(4),
+  Widget rightPanel() => sidePanel(
+    Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        small('TON EXPÉDITION', spacing: 2),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0x661B343A),
+            border: Border.all(color: Colors.white10),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.nightlight_round, color: gold, size: 24),
+              const SizedBox(height: 15),
+              heading('Le jardin\ndes murmures', size: 23),
+              const SizedBox(height: 14),
+              small('5 VAGUES  ·  1 GARDIEN ANCIEN', spacing: .8),
+              const SizedBox(height: 22),
+              Row(
+                children: List.generate(
+                  5,
+                  (i) => Expanded(
+                    child: Container(
+                      height: 4,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        color: i < run.wave ? gold : Colors.white10,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 9),
-            small('Vague ${run.wave} sur 5', color: gold),
-          ],
-        ),
-      ),
-      const SizedBox(height: 27),
-      small('DONS DE LA LANTERNE', spacing: 1.6),
-      const SizedBox(height: 13),
-      if (run.acquired.isEmpty)
-        const Text(
-          'Ta lumière attend\nson premier pouvoir.',
-          style: TextStyle(fontSize: 13, color: muted, height: 1.7),
-        ),
-      for (final gift in run.acquired)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            children: [
-              Text(
-                gift.symbol,
-                style: const TextStyle(color: gold, fontSize: 21),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  gift.name,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFFD4DED3),
-                  ),
-                ),
-              ),
+              const SizedBox(height: 9),
+              small('Vague ${run.wave} sur 5', color: gold),
             ],
           ),
         ),
-      const SizedBox(height: 28),
-      small('MEILLEURE EXPÉDITION', spacing: 1.5),
-      const SizedBox(height: 7),
-      heading('$best', size: 30),
-      small('éclats de lumière'),
-    ],
+        const SizedBox(height: 27),
+        small('DONS DE LA LANTERNE', spacing: 1.6),
+        const SizedBox(height: 13),
+        if (run.acquired.isEmpty)
+          const Text(
+            'Ta lumière attend\nson premier pouvoir.',
+            style: TextStyle(fontSize: 13, color: muted, height: 1.7),
+          ),
+        for (final gift in run.acquired)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Text(
+                  gift.symbol,
+                  style: const TextStyle(color: gold, fontSize: 21),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    gift.name,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFFD4DED3),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        const SizedBox(height: 28),
+        small('MEILLEURE EXPÉDITION', spacing: 1.5),
+        const SizedBox(height: 7),
+        heading('$best', size: 30),
+        small('éclats de lumière'),
+      ],
+    ),
   );
 
   Widget gamePanel() => Center(
@@ -588,13 +601,19 @@ class _GardenScreenState extends State<GardenScreen>
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              small(
-                                run.wave == 5
-                                    ? 'LE GARDIEN ANCIEN'
-                                    : 'JARDIN DES MURMURES',
-                                color: const Color(0xFFD1DDD1),
-                                spacing: 1.5,
+                              Flexible(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: small(
+                                    run.wave == 5
+                                        ? 'LE GARDIEN ANCIEN'
+                                        : 'JARDIN DES MURMURES',
+                                    color: const Color(0xFFD1DDD1),
+                                    spacing: 1.5,
+                                  ),
+                                ),
                               ),
+                              const SizedBox(width: 8),
                               small('${run.kills} ✦', color: gold),
                             ],
                           ),
